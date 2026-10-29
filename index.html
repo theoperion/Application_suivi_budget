@@ -162,6 +162,8 @@ button.sbar{text-align:left}.sbar .n{text-align:left}button.sbar:active{backgrou
 .mgrid button.cur{border:1.5px solid var(--ink)}.mgrid button.on{background:var(--ink);color:var(--paper)}
 .chip.sug{font-size:11px;padding:4px 9px;border-style:dashed}
 body.discret .big,body.discret .phrase,body.discret .ticket .tl span:last-child,body.discret .jl .a,body.discret .bright>span:first-child,body.discret .bsub,body.discret .pill b,body.discret .up span:last-child,body.discret .sbar .v,body.discret #scal{filter:blur(7px)}
+.ptr{position:fixed;left:50%;top:-44px;transform:translateX(-50%);z-index:8;background:var(--ink);color:var(--paper);font-family:var(--mono);font-size:11px;letter-spacing:1.5px;padding:8px 14px;border-radius:0 0 10px 10px;transition:top .15s}
+.ptr.on{top:0}
 .sbar{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12px;padding:5px 0}
 .sbar .n{width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:uppercase}
 .sbar .b{flex:1;height:8px;background:var(--track);border-radius:4px;overflow:hidden}
@@ -175,7 +177,6 @@ body.discret .big,body.discret .phrase,body.discret .ticket .tl span:last-child,
     <button class="mbtn" data-act="prev" aria-label="Mois précédent"><svg class="i" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
     <button class="mlabel" data-act="mgrid" id="mlabel"></button>
     <button class="mbtn" data-act="next" aria-label="Mois suivant"><svg class="i" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
-    <button class="ibtn" data-act="discret" aria-label="Mode discret"><svg class="i" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
     <button class="ibtn" data-act="gear" aria-label="Réglages"><svg class="i" viewBox="0 0 24 24"><path d="M10.3 4.3c.4-1.8 3-1.8 3.4 0a1.7 1.7 0 0 0 2.6 1.1c1.5-.9 3.3.8 2.4 2.4a1.7 1.7 0 0 0 1 2.5c1.9.5 1.9 3.1 0 3.5a1.7 1.7 0 0 0-1 2.6c.9 1.5-.9 3.3-2.4 2.4a1.7 1.7 0 0 0-2.6 1c-.4 1.9-3 1.9-3.4 0a1.7 1.7 0 0 0-2.6-1c-1.5.9-3.3-.9-2.4-2.4a1.7 1.7 0 0 0-1-2.6c-1.9-.4-1.9-3 0-3.5a1.7 1.7 0 0 0 1-2.5c-.9-1.6.9-3.3 2.4-2.4a1.7 1.7 0 0 0 2.6-1.1z"/><circle cx="12" cy="12" r="3"/></svg><span class="dot" id="dot"></span></button>
   </header>
   <main id="view"></main>
@@ -189,6 +190,7 @@ body.discret .big,body.discret .phrase,body.discret .ticket .tl span:last-child,
   <button class="tab" data-act="tab:stats"><svg class="i" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>STATS</button>
 </div></nav>
 
+<div class="ptr" id="ptr">↓ RELÂCHE POUR ACTUALISER</div>
 <div class="veil" id="veil" data-act="close"></div>
 <div class="sheet" id="sheet"><div class="in" id="sheetIn"></div></div>
 <div class="toast" id="toast"><span id="toastT"></span><button id="toastB"></button></div>
@@ -196,8 +198,8 @@ body.discret .big,body.discret .phrase,body.discret .ticket .tl span:last-child,
 
 <script>
 /* ================= CONFIG ================= */
-const API_URL = 'https://script.google.com/macros/s/AKfycbwCDdiW0Nrus9rHrqRqWWY9HqYmLM1GM6l0hlntWKVMlpFyWVsdfEyGinRQlvEWL9vtLw/exec';
-const VERSION = '3.0';
+const API_URL = 'COLLE_ICI_L_URL_DU_DEPLOIEMENT';
+const VERSION = '3.2';
 
 /* ================= OUTILS ================= */
 const IN_GAS = typeof google !== 'undefined' && google.script && google.script.run;
@@ -347,9 +349,9 @@ function cats() {
 }
 function catMap() { const o = {}; cats().forEach((c, i) => o[c.nom] = Object.assign({ ordre: i }, c)); return o; }
 function debut() { return S.data && S.data.debut ? new Date(S.data.debut + 'T00:00:00') : null; }
-function echMontant(e, y, m) {
+function echMontant(e, y, m, brut) {
   if (!e.lib || e.pause || e.deleted || typeof e.montant !== 'number') return 0;
-  const d0 = debut(); if (d0 && new Date(y, m - 1, 1) < d0) return 0;
+  const d0 = brut ? null : debut(); if (d0 && new Date(y, m - 1, 1) < d0) return 0;
   if (e.h && y < e.h) return 0; if (e.i && y > e.i) return 0;
   const f = Math.max(1, e.f || 1), g = e.g || 12;
   const c1 = (e.h && y > e.h) || m >= f, c2 = (e.i && y < e.i) || m <= g;
@@ -466,7 +468,7 @@ function rendre(silencieux) {
   if (silencieux && v.dataset.tab === S.tab) { const sy = scrollY; v.innerHTML = html; scrollTo(0, sy); }
   else { v.className = ''; void v.offsetWidth; v.className = 'view'; v.innerHTML = html; v.dataset.tab = S.tab; }
   if (S.tab === 'home') animerJauge();
-  if (S.tab === 'journal') { const q = $('#q'); if (q) q.addEventListener('input', ev => { S.filtre.q = ev.target.value; majListe(); }); }
+  if (S.tab === 'journal') { const q = $('#q'); if (q) q.addEventListener('input', ev => { S.filtre.q = ev.target.value; majListe(); const z = $('#prelev'); if (z) z.hidden = !!S.filtre.q; }); }
   if (S.pop) setTimeout(() => { S.pop = null; }, 900);
   S.journal.forEach(e => { if (e.nw) setTimeout(() => { e.nw = false; }, 900); });
 }
@@ -519,11 +521,28 @@ function blocAnomalies() {
   rap.forEach(r => h += /solde/i.test(r) ? `<button class="note" data-act="ctrl" style="width:100%;text-align:left">${ico.cal}<span>${esc(r.replace(/dans Paramètres ②/, ''))} <b style="font-weight:500;color:var(--ink);text-decoration:underline">Faire le contrôle ›</b></span></button>` : `<div class="note">${ico.cal}<span>${esc(r)}</span></div>`);
   return h;
 }
+function carteBilanMois() {
+  if (statut(S.y, S.m) !== 'cours' || now.getDate() > 10) return '';
+  const t = nowYM() - 1, y = Math.floor((t - 1) / 12), m = ((t - 1) % 12) + 1, cle = y + '-' + m;
+  if (LS.get('bilanVu', '') === cle) return '';
+  const c = calc(y, m); if (!c.rev && !c.dep) return '';
+  const bud = budgets(y, m), nbd = bud.filter(x => x.etat === 'bad' && !x.an).length;
+  const cm = catMap(), top = Object.keys(c.par).filter(n => cm[n].type === 'Dépense' && VAR.includes(cm[n].groupe)).map(n => ({ n, v: c.par[n].j + c.par[n].e })).sort((a, b) => b.v - a.v)[0];
+  let moy = 0; for (let i = 1; i <= 12; i++) { const z = y * 12 + m - 1 - i; moy += calc(Math.floor(z / 12), (z % 12) + 1).dep; } moy /= 12;
+  const p = moy ? Math.round((c.dep - moy) / moy * 100) : null;
+  return `<div class="ticket" style="margin:6px 0 4px">
+    <div class="tl" style="font-size:11px;letter-spacing:2px;color:var(--ink3)"><span>${esc(MOIS[m - 1].toUpperCase())} ${y} BOUCLÉ</span><span>✓</span></div>
+    <div class="tl tot"><span>RÉSULTAT</span><span class="${c.restant < 0 ? 'c-bad' : 'c-ok'}">${c.restant >= 0 ? '+' : ''}${e2(c.restant)}</span></div>
+    <div class="tl"><span>DÉPENSES VS TA MOYENNE</span><span class="${p > 0 ? 'c-bad' : 'c-ok'}">${p == null ? '—' : (p > 0 ? '+' : '') + p + ' %'}</span></div>
+    <div class="tl"><span>BUDGETS MENSUELS DÉPASSÉS</span><span>${nbd}</span></div>
+    ${top ? `<div class="tl"><span>PLUS GROS POSTE</span><span>${esc(top.n.toUpperCase())} · ${e0(top.v)}</span></div>` : ''}
+    <div style="display:flex;gap:8px;margin-top:10px"><button class="chip" data-act="bilan-stats" data-y="${y}" data-m="${m}" style="flex:1">VOIR LE DÉTAIL</button><button class="chip on" data-act="bilan-ok" data-key="${cle}" style="flex:1">C'EST NOTÉ</button></div></div>`;
+}
 function vueAccueil() {
   const b = bilan(S.y, S.m), solde = S.jmode === 'solde';
   const sc = solde ? soldeCalcule(S.y, S.m) : null;
   const val = solde ? sc : b.restant;
-  let h = blocAnomalies();
+  let h = blocAnomalies() + carteBilanMois();
   h += `<div class="gauge"><button data-act="jmode" style="display:block;width:100%" aria-label="Basculer argent restant / solde">${jaugeSVG(b)}
     <div class="big ${val != null && val < 0 ? 'c-bad' : ''}" id="big" data-v="${val == null ? 0 : val}">${val == null ? '—' : e0(val)}</div>
     <div class="lbl">${solde ? (sc == null ? 'SOLDE DE DÉPART NON SAISI' : 'SOLDE EN BANQUE ESTIMÉ' + (b.st === 'cours' ? " AUJOURD'HUI" : '')) : 'ARGENT RESTANT'} <span style="opacity:.6">⇄</span></div></button>
@@ -543,7 +562,9 @@ function vueAccueil() {
   const tous = trierBudgets(budgets(S.y, S.m)), bl = tous.slice(0, S.allBud ? 99 : 5);
   if (bl.length) {
     const nb = tous.filter(x => x.etat === 'bad').length;
-    h += `<div class="sec"><span>MES BUDGETS</span><span>${nb ? nb + ' DÉPASSÉ' + (nb > 1 ? 'S' : '') : ''}</span></div>`;
+    const rb = b.budVar - b.vr;
+    h += `<div class="sec"><span>MES BUDGETS</span><span>${nb ? nb + ' DÉPASSÉ' + (nb > 1 ? 'S' : '') : ''}</span></div>
+      <div class="note" style="margin:-2px 0 4px">Dépenses courantes ${e0(b.vr)} sur ${e0(b.budVar)} de budgets ce mois : <b style="font-weight:500" class="${rb < 0 ? 'c-bad' : 'c-ok'}">&nbsp;${rb < 0 ? 'dépassés de ' + e0(-rb) : e0(rb) + ' restants'}</b></div>`;
     bl.forEach(x => {
       const w = Math.min(100, x.ratio * 100), col = x.etat === 'bad' ? 'var(--bad)' : x.etat === 'warn' ? 'var(--warn)' : x.etat === 'ok' ? 'var(--ok)' : 'var(--ink3)';
       const st = x.etat ? `<span class="stamp s-${x.etat} ${S.pop === x.c.nom ? 'pop' : ''}">${x.etat === 'ok' ? 'TENU' : x.etat === 'warn' ? 'LIMITE' : 'DÉPASSÉ'}</span>` : '<span class="muted" style="font-size:11px">SANS ALERTE</span>';
@@ -572,10 +593,10 @@ function okFiltre(cat) {
 }
 function lignesMois() {
   const cm = catMap(), q = norm(S.filtre.q || '');
-  return S.journal.filter(e => !e.deleted && e.y === S.y && e.m === S.m)
+  return S.journal.filter(e => !e.deleted && e.y === S.y && (q || e.m === S.m))
     .filter(e => okFiltre(e.cat))
     .filter(e => !q || norm(e.lib + ' ' + e.cat).includes(q))
-    .sort((a, b) => (b.row == null ? 1e9 : b.row) - (a.row == null ? 1e9 : a.row))
+    .sort((a, b) => (b.m - a.m) || ((b.row == null ? 1e9 : b.row) - (a.row == null ? 1e9 : a.row)))
     .map(e => ({ e, c: cm[e.cat] }));
 }
 function montantLigne(t, v) {
@@ -589,14 +610,14 @@ function htmlListe() {
   const rows = l.map(({ e, c }) => {
     const t = c ? c.type : '';
     if (t === 'Revenu' || t === 'Retrait') rev += e.montant; else dep += e.montant;
-    return `<button class="jl ${e.pending ? 'pend' : ''} ${e.nw ? 'nw' : ''}" data-act="edit" data-id="${e.id}"><div class="l"><div>${esc(e.lib || e.cat)}</div><div class="c">${esc(e.cat)}${c ? '' : ' · catégorie inconnue'}${e.pending ? ' · envoi…' : ''}</div></div>
+    return `<button class="jl ${e.pending ? 'pend' : ''} ${e.nw ? 'nw' : ''}" data-act="edit" data-id="${e.id}"><div class="l"><div>${esc(e.lib || e.cat)}</div><div class="c">${S.filtre.q ? esc(MC[e.m - 1]) + ' · ' : ''}${esc(e.cat)}${c ? '' : ' · catégorie inconnue'}${e.pending ? ' · envoi…' : ''}</div></div>
       ${montantLigne(t, e.montant)}</button>`;
   }).join('');
-  return `<div class="sec" style="margin-top:14px"><span>${l.length} LIGNE${l.length > 1 ? 'S' : ''}</span><span>−${e0(dep)}${rev ? ' · +' + e0(rev) : ''}</span></div>` + rows;
+  return `<div class="sec" style="margin-top:14px"><span>${l.length} LIGNE${l.length > 1 ? 'S' : ''}${S.filtre.q ? ' EN ' + S.y : ''}</span><span>−${e0(dep)}${rev ? ' · +' + e0(rev) : ''}</span></div>` + rows;
 }
 function majListe() { const z = $('#liste'); if (z) z.innerHTML = htmlListe(); }
 function vueJournal() {
-  let h = `<div class="search">${ico.search}<input id="q" placeholder="Rechercher (courses, Netflix…)" value="${esc(S.filtre.q)}" autocomplete="off"></div>`;
+  let h = `<div class="search">${ico.search}<input id="q" placeholder="Rechercher dans toute l'année ${S.y}" value="${esc(S.filtre.q)}" autocomplete="off"></div>`;
   if (S.filtre.cat || S.filtre.grp) h += `<div class="chips" style="margin-top:10px"><button class="chip on" data-act="clearcat">${esc(S.filtre.cat || GRPS[S.filtre.grp][0])} ✕</button></div>`;
   const cm = catMap(), av = avenirMois(S.y, S.m).filter(a => okFiltre(a.cat));
   if (av.length && !S.filtre.q) {
@@ -605,9 +626,10 @@ function vueJournal() {
   }
   h += `<div id="liste">${htmlListe()}</div>`;
   const oc = occurrences(S.y, S.m).filter(o => okFiltre(o.cat));
-  if (oc.length && !S.filtre.q && !S.filtre.cat) {
-    h += `<div class="sec"><span>PRÉLÈVEMENTS AUTO (ÉCHÉANCIER)</span><span>${oc.length}</span></div>`;
+  if (oc.length && !S.filtre.cat) {
+    h += `<div id="prelev" ${S.filtre.q ? 'hidden' : ''}><div class="sec"><span>PRÉLÈVEMENTS AUTO (ÉCHÉANCIER)</span><span>${oc.length}</span></div>`;
     oc.forEach(o => h += `<button class="jl" style="opacity:.6" data-act="ech" data-id="${o.id}" data-ctx="1"><div class="l"><div>${esc(o.lib)}</div><div class="c">${esc(o.cat)} · le ${o.jour}</div></div>${montantLigne(o.type, o.v)}</button>`);
+    h += '</div>';
   }
   return h;
 }
@@ -1010,11 +1032,12 @@ function rendreEch() {
   let tout = '';
   if (f.all) GROUPES.forEach(g => { const l = cats().filter(c => c.groupe === g); if (!l.length) return; tout += `<div class="grp">${esc(g.toUpperCase())}</div><div class="chips">` + l.map(c => `<button class="chip ${f.cat === c.nom ? 'on' : ''}" data-act="ech-cat" data-cat="${esc(c.nom)}">${esc(c.nom)}</button>`).join('') + '</div>'; });
   const x = f.id ? trouverEch(f.id) : null;
-  let extra = '';
+  let extra = '', reelHaut = '';
   if (x && f.ctx && echMontant(x, f.ctx.y, f.ctx.m)) {
     const nomM = MOIS[f.ctx.m - 1].toUpperCase(), fut = statut(f.ctx.y, f.ctx.m) === 'futur';
     extra += `<div class="grp" style="margin-top:20px">MONTANT RÉEL EN ${nomM} ${f.ctx.y}${fut ? ' (CONNU À L\'AVANCE)' : ''}</div>`
-      + `<div style="display:flex;gap:8px;align-items:center"><input class="libin" data-f="reel" inputmode="decimal" placeholder="Prévu : ${e2(x.montant)} €" value="${esc(f.reel)}" style="margin:6px 0"><button class="chip" data-act="ech-reel" style="height:42px;white-space:nowrap">OK</button></div><div class="hint" id="reelh" style="text-align:left;margin:0"></div>`;
+      + `<div style="display:flex;gap:8px;align-items:center"><input class="libin" data-f="reel" inputmode="decimal" placeholder="Prévu : ${e2(x.montant)} €" value="${esc(f.reel)}" style="margin:6px 0"><button class="chip" data-act="ech-reel" style="height:42px;white-space:nowrap">OK</button></div><div class="hint" id="reelh" style="text-align:left;margin:0"></div><div class="note" style="margin-top:4px">Ce mois-ci seulement : les autres mois gardent le montant habituel.</div>`;
+    reelHaut = extra; extra = '';
   }
   if (x && mens && !echTermine(x)) {
     extra += `<div class="grp" style="margin-top:20px">LE MONTANT CHANGE POUR DE BON</div>
@@ -1025,7 +1048,9 @@ function rendreEch() {
   }
   $('#sheetIn').innerHTML = enteteSheet(f.id ? 'MODIFIER LE PRÉLÈVEMENT' : 'NOUVEAU PRÉLÈVEMENT') + `
     <input class="libin" data-f="lib" placeholder="Libellé (Loyer, Netflix, Salaire…)" value="${esc(f.lib)}" maxlength="80" style="margin-top:14px">
-    <input class="libin" data-f="montant" inputmode="decimal" placeholder="Montant en €" value="${esc(f.montant)}" style="margin-top:0">
+    ${reelHaut}
+    <div class="grp" style="margin-top:${reelHaut ? 20 : 4}px">${x ? 'MONTANT HABITUEL · CHANGE TOUS LES MOIS' : 'MONTANT'}</div>
+    <input class="libin" data-f="montant" inputmode="decimal" placeholder="Montant en €" value="${esc(f.montant)}" style="margin-top:6px">
     <div class="chips">${sel}</div>${tout}
     <div class="seg">${FREQS.map(q => `<button class="${f.freq === q ? 'on' : ''}" data-act="ech-freq" data-t="${q}">${{ Mensuel: 'MENSUEL', Trimestriel: 'TRIM.', Semestriel: 'SEMEST.', Annuel: 'ANNUEL' }[q]}</button>`).join('')}</div>
     ${stp('JOUR DU MOIS', 'jour', 'le ' + f.jour)}
@@ -1160,7 +1185,7 @@ function rendreReglages() {
     <div class="grp" style="margin:10px 0 0;letter-spacing:1px">TAMPON « LIMITE » À PARTIR DE</div>
     <div class="seg">${[0.75, 0.85, 0.95].map(k => `<button class="${Math.abs(se - k) < 0.001 ? 'on' : ''}" data-act="seuil" data-t="${k}">${Math.round(k * 100)} %</button>`).join('')}</div>
     <div class="grp" style="margin-top:18px">CONFORT</div>
-    ${tg('discret', LS.get('discret', false), 'Mode discret', 'floute les montants · aussi avec l\'œil en haut')}
+    ${tg('discret', LS.get('discret', false), 'Mode discret', 'floute les montants quand tu montres ton téléphone')}
     ${tg('vibre', LS.get('vibre', true), 'Vibrations', 'petit retour quand tu enregistres')}
     <div class="grp" style="margin-top:18px">APPARENCE</div>
     <div class="seg">${[['auto', 'AUTO'], ['light', 'CLAIR'], ['dark', 'SOMBRE']].map(([k, l]) => `<button class="${t === k ? 'on' : ''}" data-act="theme" data-t="${k}">${l}</button>`).join('')}</div>
@@ -1328,12 +1353,12 @@ function statsAnnee(y) {
     if (cl.length > 8) h += `<button class="chip" style="margin-top:8px" data-act="allcat">${S.allCat ? 'Moins ▴' : 'Toutes (' + cl.length + ') ▾'}</button>`;
   }
   // abonnements actifs
-  const abos = S.data.echeancier.filter(e => !e.deleted && !e.pause && !echTermine(e) && cm[e.cat] && cm[e.cat].groupe === 'Abonnements')
-    .map(e => ({ e, an: (e.montant || 0) * ({ Mensuel: 12, Trimestriel: 4, Semestriel: 2 }[e.freq] || 1) })).sort((a, b) => b.an - a.an);
+  const abos = S.data.echeancier.filter(e => !e.deleted && !e.pause && cm[e.cat] && cm[e.cat].groupe === 'Abonnements')
+    .map(e => { let an = 0; for (let k = 1; k <= 12; k++) an += echMontant(e, y, k, true); return { e, an }; }).filter(a => a.an > 0).sort((a, b) => b.an - a.an);
   if (abos.length) {
     const ta = abos.reduce((s, a) => s + a.an, 0);
-    h += `<div class="sec"><span>MES ABONNEMENTS</span><span>${e0(ta)}/AN · ${e0(ta / 12)}/MOIS</span></div>`;
-    abos.forEach(a => h += `<button class="up" data-act="ech" data-id="${a.e.id}"><span>${esc(a.e.freq === 'Mensuel' ? 'MOIS' : a.e.freq.slice(0, 4).toUpperCase() + '.')}</span><span>${esc(a.e.lib)}</span><span>${e0(a.an)}/an</span></button>`);
+    h += `<div class="sec"><span>MES ABONNEMENTS ${y}</span><span>${e0(ta)}/AN · ${e0(ta / 12)}/MOIS</span></div>`;
+    abos.forEach(a => h += `<button class="up" data-act="ech" data-id="${a.e.id}"><span>${esc(a.e.freq === 'Mensuel' ? 'MOIS' : a.e.freq.slice(0, 4).toUpperCase() + '.')}</span><span>${esc(a.e.lib)}</span><span>${e0(a.an)}</span></button>`);
     h += `<div class="note">À passer en revue tous les 3 mois : touche un abonnement pour l'arrêter ou le modifier.</div>`;
   }
   // comparaison des années
@@ -1454,6 +1479,8 @@ document.addEventListener('click', ev => {
     case 'gomois': S.m = +el.dataset.m; S.tab = 'home'; rendre(); scrollTo(0, 0); break;
     case 'fiche': S.form = { mode: 'fiche', cat: el.dataset.cat }; rendreForm(); ouvrirSheet(); break;
     case 'fiche-journal': { const c = S.form.cat; fermer(); S.filtre = { cat: c, q: '', grp: null }; S.tab = 'journal'; rendre(); scrollTo(0, 0); break; }
+    case 'bilan-ok': LS.set('bilanVu', el.dataset.key); rendre(true); break;
+    case 'bilan-stats': S.y = +el.dataset.y; S.m = +el.dataset.m; S.tab = 'stats'; S.statsVue = 'mois'; rendre(); scrollTo(0, 0); break;
     case 'allcat': S.allCat = !S.allCat; rendre(true); break;
     case 'pin': { const p = LS.get('pins', []), n = el.dataset.cat; LS.set('pins', p.includes(n) ? p.filter(x => x !== n) : p.concat([n])); rendreCats(); break; }
     case 'ordreBud': LS.set('ordreBud', el.dataset.t); rendreReglages(); rendre(true); break;
@@ -1492,6 +1519,12 @@ document.addEventListener('click', ev => {
     case 'logout': fermer(); LS.del('key'); S.key = ''; verrouiller(); break;
   }
 });
+(function tirerPourActualiser() {
+  let y0 = null, ok = false; const ind = $('#ptr');
+  document.addEventListener('touchstart', e => { y0 = (window.scrollY <= 0 && !$('#sheet').classList.contains('on')) ? e.touches[0].clientY : null; ok = false; }, { passive: true });
+  document.addEventListener('touchmove', e => { if (y0 == null) return; ok = e.touches[0].clientY - y0 > 80; ind.classList.toggle('on', ok); }, { passive: true });
+  document.addEventListener('touchend', () => { if (ok) { S.lastFetch = 0; rafraichir(true); pomper(); toast('Actualisation…'); vibrer(); } ind.classList.remove('on'); y0 = null; ok = false; });
+})();
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { rafraichir(false); pomper(); } });
 
 /* ================= DÉMARRAGE ================= */
