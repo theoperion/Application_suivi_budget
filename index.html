@@ -196,7 +196,7 @@ body.discret .big,body.discret .phrase,body.discret .ticket .tl span:last-child,
 
 <script>
 /* ================= CONFIG ================= */
-const API_URL = 'https://script.google.com/macros/s/AKfycbz600zU-fLmMZNfRJ-_WfqG1hc4SU92g4gDUkgG-yVbLWI5mc4_YMAK0GxacBA8S2Yi/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbwCDdiW0Nrus9rHrqRqWWY9HqYmLM1GM6l0hlntWKVMlpFyWVsdfEyGinRQlvEWL9vtLw/exec';
 const VERSION = '3.0';
 
 /* ================= OUTILS ================= */
@@ -940,8 +940,7 @@ function retirerCat() {
 function signe(type) { return type === 'Revenu' || type === 'Retrait' ? 1 : -1; }
 function soldeDepart(y) { const s = S.data.soldes ? S.data.soldes[String(y)] : null; return typeof s === 'number' && Math.abs(s) > 1 ? s : null; }
 function ouvrirSolde() {
-  const d = now.getDate(); let y = now.getFullYear(), m = now.getMonth() + 1;
-  if (d < 25) { m--; if (m < 1) { m = 12; y--; } }
+  const y = now.getFullYear(), m = now.getMonth() + 1;
   const c = S.data.controle || {};
   S.form = { mode: 'solde', y, m, banque: '', especes: c.especes ? txtNum(c.especes) : '', dep: '', neg: false };
   rendreForm();
@@ -1221,7 +1220,8 @@ function rendreSolde() {
       <div class="grp" style="margin-top:16px">CE QUE DIT TA BANQUE</div>${champsBanque}
       <div class="hint" id="secart" style="margin-top:6px"></div><div class="err" id="ferr"></div>
       <button class="go" data-act="s-ok">ENREGISTRER LE CONTRÔLE</button>
-      <div class="note">${cours ? 'En cours de mois, le calcul compte tes saisies du mois et les prélèvements dont la date est passée.' : 'À faire quand toutes les dépenses du mois sont saisies.'}</div>
+      <div class="note">${cours ? 'Le calcul compte tes saisies du mois et les prélèvements dont la date est passée.' : 'À faire quand toutes les dépenses du mois sont saisies.'}</div>
+      ${cours && now.getDate() >= 26 ? '<div class="note c-warn">Fin de mois : si ton salaire est déjà arrivé, il est compté au 1er du mois prochain, donc un écart positif de son montant est normal. Le meilleur moment pour contrôler, c\'est du 1er au 4.</div>' : ''}
       <button class="ghost" data-act="dep-calc" style="margin-top:14px">RECALER LE SOLDE DE DÉPART SUR CE MONTANT</button>`;
   }
   const hist = LS.get('controles', []).slice(0, 5);
