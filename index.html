@@ -164,6 +164,10 @@ button.sbar{text-align:left}.sbar .n{text-align:left}button.sbar:active{backgrou
 body.discret .big,body.discret .phrase,body.discret .ticket .tl span:last-child,body.discret .jl .a,body.discret .bright>span:first-child,body.discret .bsub,body.discret .pill b,body.discret .up span:last-child,body.discret .sbar .v,body.discret #scal{filter:blur(7px)}
 .ptr{position:fixed;left:50%;top:-44px;transform:translateX(-50%);z-index:8;background:var(--ink);color:var(--paper);font-family:var(--mono);font-size:11px;letter-spacing:1.5px;padding:8px 14px;border-radius:0 0 10px 10px;transition:top .15s}
 .ptr.on{top:0}
+.pbas{display:block;width:100%;text-align:left;margin-top:8px;border:1.5px solid var(--rule);border-radius:8px;padding:8px 10px 6px;font-family:var(--mono)}
+.pbas:active{background:var(--soft)}.pbh{display:flex;justify-content:space-between;align-items:baseline;font-size:10px;letter-spacing:1px;color:var(--ink3)}
+.pbh b{font-size:16px;font-weight:600;letter-spacing:0}.pbs{font-size:10px;color:var(--ink3);margin-top:1px}
+body.discret .pbh b{filter:blur(7px)}
 .sbar{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12px;padding:5px 0}
 .sbar .n{width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:uppercase}
 .sbar .b{flex:1;height:8px;background:var(--track);border-radius:4px;overflow:hidden}
@@ -198,8 +202,9 @@ body.discret .big,body.discret .phrase,body.discret .ticket .tl span:last-child,
 
 <script>
 /* ================= CONFIG ================= */
-const API_URL = 'https://script.google.com/macros/s/AKfycbwCDdiW0Nrus9rHrqRqWWY9HqYmLM1GM6l0hlntWKVMlpFyWVsdfEyGinRQlvEWL9vtLw/exec';
-const VERSION = '3.2';
+const API_URL = 'https://script.google.com/macros/s/AKfycbyPhMYduPFehst2c5x_VhOk9Hq8U9AAZsCE7Yj5ozvHloXCyMoi8KxdggiGDyKcvAV9wg/exec';
+const VERSION = '3.4';
+const API_ATTENDUE = '3.3';
 
 /* ================= OUTILS ================= */
 const IN_GAS = typeof google !== 'undefined' && google.script && google.script.run;
@@ -334,8 +339,9 @@ async function pomper() {
   S.busy = false;
   if (!res.ok) {
     if (res.error === 'CLE') { sauver(); return verrouiller(res.message); }
-    toast('Pas enregistré dans le fichier : ' + (res.message || 'erreur'));
-    S.queue = []; sauver(); S.busy = false; rafraichir(true); return;
+    const vieux = /Action inconnue/.test(res.message || '');
+    toast(vieux ? "Pas enregistré : ton Apps Script n'est pas à jour (Gérer les déploiements > Nouvelle version)" : 'Pas enregistré dans le fichier : ' + (res.message || 'erreur'));
+    sauver(); rendre(true); pomper(); return;
   }
   sauver(); rendre(true); pomper();
 }
@@ -538,11 +544,52 @@ function carteBilanMois() {
     ${top ? `<div class="tl"><span>PLUS GROS POSTE</span><span>${esc(top.n.toUpperCase())} · ${e0(top.v)}</span></div>` : ''}
     <div style="display:flex;gap:8px;margin-top:10px"><button class="chip" data-act="bilan-stats" data-y="${y}" data-m="${m}" style="flex:1">VOIR LE DÉTAIL</button><button class="chip on" data-act="bilan-ok" data-key="${cle}" style="flex:1">C'EST NOTÉ</button></div></div>`;
 }
+// Solde prévu jour par jour, d'aujourd'hui à la fin du mois prochain :
+// prélèvements à leur date, achats prévus, et budgets restants étalés sur les jours.
+function courbeSolde() {
+  const y = now.getFullYear(), m = now.getMonth() + 1, d = now.getDate();
+  let s = soldeCalcule(y, m); if (s == null) return null;
+  const cm = catMap(), pts = [{ y, m, j: d, s }];
+  [[y, m], [m === 12 ? y + 1 : y, m === 12 ? 1 : m + 1]].forEach(([yy, mm], k) => {
+    const b = bilan(yy, mm), nbj = dim(yy, mm), j0 = k === 0 ? d : 0, reste = nbj - j0;
+    const parJour = reste > 0 ? Math.max(0, k === 0 ? b.resteBud : b.prevVar) / reste : 0;
+    const oc = occurrences(yy, mm), av = avenirMois(yy, mm);
+    for (let j = j0 + 1; j <= nbj; j++) {
+      oc.forEach(o => { if (Math.min(o.jour, nbj) === j) s += signe(o.type) * o.v; });
+      av.forEach(a => { if (Math.min(a.jour || 15, nbj) === j) s += signe(cm[a.cat] ? cm[a.cat].type : 'Dépense') * a.montant; });
+      s -= parJour;
+      pts.push({ y: yy, m: mm, j, s });
+    }
+  });
+  return pts;
+}
+function cartePointBas() {
+  const pts = courbeSolde(); if (!pts || pts.length < 3) return '';
+  const bas = pts.reduce((a, p) => p.s < a.s ? p : a, pts[0]);
+  const cls = bas.s < 0 ? 'c-bad' : bas.s < 100 ? 'c-warn' : 'c-ok', col = bas.s < 0 ? 'var(--bad)' : bas.s < 100 ? 'var(--warn)' : 'var(--ok)';
+  const W = 320, H = 64, mx = Math.max(...pts.map(p => p.s), 0), mn = Math.min(...pts.map(p => p.s), 0);
+  const X = i => i / (pts.length - 1) * W, Y = v => 6 + (mx - v) / ((mx - mn) || 1) * (H - 12);
+  const ib = pts.indexOf(bas), ligne = pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(p.s).toFixed(1)}`).join(' ');
+  const fin = pts.findIndex(p => p.m !== pts[0].m);
+  return `<button class="pbas" data-act="tab:prevu">
+    <div class="pbh"><span>POINT BAS PRÉVU</span><b class="${cls}">${e0(bas.s)}</b></div>
+    <div class="pbs">le ${bas.j} ${MC[bas.m - 1]}${bas.s < 0 ? ' · risque de découvert' : ''} · si tu tiens tes budgets</div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block;margin-top:6px" preserveAspectRatio="none" role="img" aria-label="Solde prévu jour par jour">
+      ${mn < 0 ? `<line x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--bad)" stroke-dasharray="3 3" stroke-width="1"/>` : ''}
+      ${fin > 0 ? `<line x1="${X(fin)}" x2="${X(fin)}" y1="0" y2="${H}" stroke="var(--rule)" stroke-width="1"/>` : ''}
+      <path d="${ligne}" fill="none" stroke="var(--ink)" stroke-width="1.8" vector-effect="non-scaling-stroke"/>
+      <circle cx="${X(ib)}" cy="${Y(bas.s)}" r="4" fill="${col}"/></svg>
+    <div class="pbs" style="display:flex;justify-content:space-between"><span>aujourd'hui</span>${fin > 0 ? `<span>${esc(MC[pts[fin].m - 1])}</span>` : ''}<span>fin ${esc(MC[pts[pts.length - 1].m - 1])}</span></div></button>`;
+}
+function alerteVersion() {
+  if (IN_GAS || !S.data || S.data.apiVersion === API_ATTENDUE) return '';
+  return `<div class="alert" style="cursor:default">⚠ Ton Apps Script n'est pas à jour : certaines modifications ne seront pas enregistrées.<ul style="list-style:none;padding:0"><li>Dans Apps Script, recolle le dernier Code.gs, puis Déployer › Gérer les déploiements › crayon › Nouvelle version › Déployer.</li></ul></div>`;
+}
 function vueAccueil() {
   const b = bilan(S.y, S.m), solde = S.jmode === 'solde';
   const sc = solde ? soldeCalcule(S.y, S.m) : null;
   const val = solde ? sc : b.restant;
-  let h = blocAnomalies() + carteBilanMois();
+  let h = alerteVersion() + blocAnomalies() + carteBilanMois();
   h += `<div class="gauge"><button data-act="jmode" style="display:block;width:100%" aria-label="Basculer argent restant / solde">${jaugeSVG(b)}
     <div class="big ${val != null && val < 0 ? 'c-bad' : ''}" id="big" data-v="${val == null ? 0 : val}">${val == null ? '—' : e0(val)}</div>
     <div class="lbl">${solde ? (sc == null ? 'SOLDE DE DÉPART NON SAISI' : 'SOLDE EN BANQUE ESTIMÉ' + (b.st === 'cours' ? " AUJOURD'HUI" : '')) : 'ARGENT RESTANT'} <span style="opacity:.6">⇄</span></div></button>
@@ -552,6 +599,7 @@ function vueAccueil() {
   const ap = aPrelever(S.y, S.m); if (ap != null) pills.push(`<button class="pill" data-act="tab:prevu"><small>À PRÉLEVER</small><b>${e0(ap)}</b></button>`);
   const nd = nonDepense(S.y); if (nd != null) pills.push(`<button class="pill ${nd < 0 ? 'p-bad' : ''}" data-act="stats-an"><small>NON DÉPENSÉ ${S.y}</small><b>${sg0(nd)}</b></button>`);
   if (pills.length) h += `<div class="pills" style="grid-template-columns:repeat(${pills.length},1fr)">${pills.join('')}</div>`;
+  if (b.st === 'cours') h += cartePointBas();
   h += `</div>`;
   h += `<div class="sec"><span>TICKET DU MOIS</span></div><div class="ticket">
     <button class="tl" data-act="grp:rev"><span>REVENUS</span><span>${e2(b.rev)}</span></button>
@@ -564,7 +612,7 @@ function vueAccueil() {
     const nb = tous.filter(x => x.etat === 'bad').length;
     const rb = b.budVar - b.vr;
     h += `<div class="sec"><span>MES BUDGETS</span><span>${nb ? nb + ' DÉPASSÉ' + (nb > 1 ? 'S' : '') : ''}</span></div>
-      <div class="note" style="margin:-2px 0 4px">Dépenses courantes ${e0(b.vr)} sur ${e0(b.budVar)} de budgets ce mois : <b style="font-weight:500" class="${rb < 0 ? 'c-bad' : 'c-ok'}">&nbsp;${rb < 0 ? 'dépassés de ' + e0(-rb) : e0(rb) + ' restants'}</b></div>`;
+      <div class="note" style="margin:-2px 0 4px"><span>Dépenses courantes ${e0(b.vr)} sur ${e0(b.budVar)} de budgets ce mois : <b style="font-weight:500" class="${rb < 0 ? 'c-bad' : 'c-ok'}">${rb < 0 ? 'dépassés de ' + e0(-rb) : e0(rb) + ' restants'}</b></span></div>`;
     bl.forEach(x => {
       const w = Math.min(100, x.ratio * 100), col = x.etat === 'bad' ? 'var(--bad)' : x.etat === 'warn' ? 'var(--warn)' : x.etat === 'ok' ? 'var(--ok)' : 'var(--ink3)';
       const st = x.etat ? `<span class="stamp s-${x.etat} ${S.pop === x.c.nom ? 'pop' : ''}">${x.etat === 'ok' ? 'TENU' : x.etat === 'warn' ? 'LIMITE' : 'DÉPASSÉ'}</span>` : '<span class="muted" style="font-size:11px">SANS ALERTE</span>';
@@ -681,6 +729,7 @@ function rendreForm() {
     <div class="seg">${Object.keys(TYPES).map(t => `<button class="${f.type === t ? 'on' : ''}" data-act="type" data-t="${t}">${t.toUpperCase()}</button>`).join('')}</div>
     <div class="amt ${montantNum() ? '' : 'zero'}" id="amt">${f.montant ? esc(f.montant) : '0'} €</div>
     <div class="mrow"><button class="mbtn" data-act="fm:-1" aria-label="Mois précédent">‹</button><span>${moisLabel(f.y, f.m).toUpperCase()}</span><button class="mbtn" data-act="fm:1" aria-label="Mois suivant">›</button></div>
+    ${/^Écart/.test(f.lib || '') ? `<div class="mrow" style="margin-top:2px"><button class="chip" data-act="sgn">± CHANGER LE SIGNE</button></div>` : ''}
     ${futur && f.mode === 'add' ? `<div class="mrow" style="margin-top:2px"><button class="mbtn" data-act="fj:-1" aria-label="Jour précédent">‹</button><span>${f.jour ? 'LE ' + f.jour : 'JOUR NON PRÉCISÉ'}</span><button class="mbtn" data-act="fj:1" aria-label="Jour suivant">›</button></div>` : ''}
     <div class="hint" id="hint"></div>
     <div class="chips">${chips}</div>${tout}
@@ -716,7 +765,8 @@ function touche(k) {
 function vibrer() { if (navigator.vibrate && LS.get('vibre', true)) navigator.vibrate(12); }
 function enregistrer() {
   const f = S.form, n = Math.round(montantNum() * 100) / 100;
-  if (!(n > 0)) { $('#ferr').textContent = 'Tape un montant'; return; }
+  const ecart = /^Écart/.test((f.lib || '').trim());
+  if (!(n > 0) && !(ecart && n < 0)) { $('#ferr').textContent = 'Tape un montant'; return; }
   if (!f.cat) { $('#ferr').textContent = 'Choisis une catégorie'; return; }
   const mois = moisLabel(f.y, f.m), futur = statut(f.y, f.m) === 'futur';
   if (S.data.mois && S.data.mois.length && !S.data.mois.includes(mois)) { $('#ferr').textContent = mois + " n'existe pas dans ton fichier"; return; }
@@ -1488,6 +1538,7 @@ document.addEventListener('click', ev => {
     case 'discret': LS.set('discret', !LS.get('discret', false)); if (S.form && S.form.mode === 'reglages') rendreReglages(); rendre(true); break;
     case 'vibre': LS.set('vibre', !LS.get('vibre', true)); rendreReglages(); break;
     case 'dup': { const e = trouver(S.form.id); if (e) ouvrirSaisie(e, true); break; }
+    case 'sgn': S.form.montant = S.form.montant.startsWith('-') ? S.form.montant.slice(1) : '-' + (S.form.montant || ''); majHint(); break;
     case 'libsug': S.form.lib = el.dataset.l; $('#lib').value = el.dataset.l; break;
     case 'hist-clear': if (!S.form.armH) { S.form.armH = true; rendreSolde(); } else { LS.set('controles', []); S.form.armH = false; toast('Historique vidé'); rendreSolde(); } break;
     case 'dep-calc': departCalcule(); break;
