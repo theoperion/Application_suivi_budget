@@ -129,6 +129,18 @@ nav .in{max-width:480px;margin:0 auto;display:flex;justify-content:space-around;
 .lock[hidden]{display:none}
 .lock .in{width:100%;max-width:340px;text-align:center}
 .opt{display:flex;justify-content:space-between;align-items:center;width:100%;padding:13px 0;border-bottom:1px dashed var(--rule);text-align:left}
+.stp{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--rule);font-family:var(--mono);font-size:11px;letter-spacing:1px;color:var(--ink2)}
+.stp .v{display:flex;align-items:center;gap:4px}.stp .v span{min-width:104px;text-align:center;font-size:13px;color:var(--ink);letter-spacing:0}
+.stp .v button{width:34px;height:34px;border-radius:8px;background:var(--card);font-size:16px;color:var(--ink)}
+.stp .v button:active{background:var(--soft)}
+.tgl{width:46px;height:26px;border-radius:13px;background:var(--track);position:relative;transition:background .15s}.tgl.on{background:var(--ok)}
+.tgl i{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:var(--paper);transition:left .15s}.tgl.on i{left:23px}
+.back{font-family:var(--mono);font-size:12px;letter-spacing:1.5px;color:var(--ink2);padding:8px 0}
+.add{display:block;width:100%;border:1.5px dashed var(--rule);border-radius:10px;padding:13px;font-family:var(--mono);font-size:12px;letter-spacing:1.5px;margin-top:16px;color:var(--ink2)}
+.add:active,.mv:active,.crow .nm:active{background:var(--soft)}
+.ghost{width:100%;height:46px;border-radius:12px;border:1.5px solid var(--rule);font-family:var(--mono);letter-spacing:1px;font-size:13px;margin-top:8px}
+.crow{display:flex;align-items:center;gap:4px;border-bottom:1px dashed var(--rule)}.crow .nm{flex:1;text-align:left;padding:9px 0;min-width:0}
+.mv{width:34px;height:34px;border-radius:6px;color:var(--ink3);font-size:12px}
 .sbar{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12px;padding:5px 0}
 .sbar .n{width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:uppercase}
 .sbar .b{flex:1;height:8px;background:var(--track);border-radius:4px;overflow:hidden}
@@ -163,7 +175,7 @@ nav .in{max-width:480px;margin:0 auto;display:flex;justify-content:space-around;
 <script>
 /* ================= CONFIG ================= */
 const API_URL = 'https://script.google.com/macros/s/AKfycbwCDdiW0Nrus9rHrqRqWWY9HqYmLM1GM6l0hlntWKVMlpFyWVsdfEyGinRQlvEWL9vtLw/exec';
-const VERSION = '1.0';
+const VERSION = '2.0';
 
 /* ================= OUTILS ================= */
 const IN_GAS = typeof google !== 'undefined' && google.script && google.script.run;
@@ -200,6 +212,10 @@ const S = {
   const c = LS.get('cache', null);
   if (c && c.data) { S.data = c.data; S.journal = c.journal || []; }
 })();
+function prepData(d) {
+  (d.echeancier || []).forEach(e => { e.id = 'e' + e.ligne; e.srv = { lib: e.lib, cat: e.cat, montant: e.montant }; });
+  return d;
+}
 function sauver() { LS.set('cache', { data: S.data, journal: S.journal }); LS.set('queue', S.queue); }
 function entriesFromData(d) {
   return d.journal.map(r => { const p = parseMois(r.mois); const base = { mois: r.mois, lib: r.lib, cat: r.cat, montant: typeof r.montant === 'number' ? r.montant : Number(r.montant) }; return Object.assign({ id: 'r' + r.row, row: r.row, y: p ? p.y : null, m: p ? p.m : null, srv: Object.assign({}, base, { montant: r.montant }) }, base); });
@@ -226,14 +242,16 @@ function setSync(s) { $('#dot').className = 'dot' + (s === 'sync' ? ' sync' : s 
 
 async function rafraichir(force) {
   if (!S.key) return;
+  if (S.queue.length) return;
   if (!force && Date.now() - S.lastFetch < 20000) return;
   S.lastFetch = Date.now();
   if (!S.queue.length) setSync('sync');
   try {
     const r = await api('data');
     if (!r.ok) { if (r.error === 'CLE' || r.error === 'SANS_CLE') return verrouiller(r.message); throw new Error(r.message); }
-    S.data = r.data;
-    if (!S.queue.length) S.journal = entriesFromData(r.data);
+    if (S.queue.length) return;
+    S.data = prepData(r.data);
+    S.journal = entriesFromData(r.data);
     sauver(); if (!S.queue.length) setSync('ok');
     rendre(true);
   } catch (e) { setSync('off'); }
@@ -241,6 +259,8 @@ async function rafraichir(force) {
 
 /* ================= FILE D'ÉCRITURES (optimiste) ================= */
 const pick = e => ({ mois: e.mois, lib: e.lib, cat: e.cat, montant: e.montant });
+const pickEch = e => ({ lib: e.lib, cat: e.cat, montant: e.montant, freq: e.freq, jour: e.jour, f: e.f, g: e.g, h: e.h, i: e.i, pause: !!e.pause });
+const trouverEch = id => S.data && S.data.echeancier.find(e => e.id === id);
 const trouver = id => S.journal.find(e => e.id === id);
 function enfiler(op) { S.queue.push(op); sauver(); pomper(); }
 async function pomper() {
@@ -248,10 +268,22 @@ async function pomper() {
   const op = S.queue[0];
   if (!op) { setSync('ok'); setTimeout(() => rafraichir(true), 1500); return; }
   S.busy = true; setSync('sync');
-  const e = trouver(op.id);
+  const J = ['add', 'update', 'delete'].includes(op.op);
+  const e = J ? trouver(op.id) : null, x = op.op.startsWith('ech') ? trouverEch(op.id) : null;
   let res = { ok: true };
   try {
-    if (!e) res = { ok: true };
+    if (op.op === 'call') {
+      res = await api(op.action, op.payload);
+      const P = op.payload || {}, de = op.action === 'cat-edit' ? P.ancien : op.action === 'cat-del' ? P.nom : null, vers = op.action === 'cat-edit' ? P.nom : P.cible;
+      if (res.ok && de && vers && de !== vers) { S.journal.forEach(z => { if (z.srv && z.srv.cat === de) z.srv.cat = vers; }); S.data.echeancier.forEach(z => { if (z.srv && z.srv.cat === de) z.srv.cat = vers; }); }
+    }
+    else if (op.op === 'ech-save') {
+      if (x) { res = await api('ech-save', { row: x.ligne || null, attendu: x.srv, e: pickEch(x) }); if (res.ok) { x.ligne = res.row; x.srv = { lib: x.lib, cat: x.cat, montant: x.montant }; } }
+    } else if (op.op === 'ech-del') {
+      if (x && x.ligne) { res = await api('ech-del', { row: x.ligne, attendu: x.srv }); }
+      if (res.ok) S.data.echeancier = S.data.echeancier.filter(z => z !== x);
+    }
+    else if (!e) res = { ok: true };
     else if (op.op === 'add') {
       res = await api('add', { ligne: pick(e) });
       if (res.ok) { e.row = res.row; e.srv = pick(e); }
@@ -268,6 +300,7 @@ async function pomper() {
   }
   S.queue.shift();
   if (e && !S.queue.some(o => o.id === e.id)) e.pending = false;
+  if (x && !S.queue.some(o => o.id === x.id)) x.pending = false;
   S.busy = false;
   if (!res.ok) {
     if (res.error === 'CLE') { sauver(); return verrouiller(res.message); }
@@ -279,11 +312,15 @@ async function pomper() {
 
 /* ================= CALCULS ================= */
 let memo = new Map();
-function cats() { return S.data ? S.data.categories : []; }
+function cats() {
+  if (!S.data) return [];
+  const o = LS.get('ordre', []), pos = n => { const i = o.indexOf(n); return i < 0 ? 1e4 : i; };
+  return S.data.categories.map((c, i) => [c, i]).sort((a, b) => (pos(a[0].nom) - pos(b[0].nom)) || (a[1] - b[1])).map(x => x[0]);
+}
 function catMap() { const o = {}; cats().forEach((c, i) => o[c.nom] = Object.assign({ ordre: i }, c)); return o; }
 function debut() { return S.data && S.data.debut ? new Date(S.data.debut + 'T00:00:00') : null; }
 function echMontant(e, y, m) {
-  if (!e.lib || e.pause || typeof e.montant !== 'number') return 0;
+  if (!e.lib || e.pause || e.deleted || typeof e.montant !== 'number') return 0;
   const d0 = debut(); if (d0 && new Date(y, m - 1, 1) < d0) return 0;
   if (e.h && y < e.h) return 0; if (e.i && y > e.i) return 0;
   const f = Math.max(1, e.f || 1), g = e.g || 12;
@@ -340,7 +377,7 @@ function soldeFin(y, m) {
 function occurrences(y, m) {
   const cm = catMap();
   return (S.data ? S.data.echeancier : []).map(e => ({ e, v: echMontant(e, y, m), c: cm[e.cat] }))
-    .filter(o => o.v && o.c).map(o => ({ lib: o.e.lib, cat: o.e.cat, type: o.c.type, v: o.v, jour: o.e.jour || 1, y, m }))
+    .filter(o => o.v && o.c).map(o => ({ id: o.e.id, lib: o.e.lib, cat: o.e.cat, type: o.c.type, v: o.v, jour: o.e.jour || 1, y, m }))
     .sort((a, b) => a.jour - b.jour);
 }
 function prochains(n) {
@@ -410,7 +447,7 @@ function blocAnomalies() {
   const rap = lines.filter(l => l.startsWith('📅')).map(l => l.replace(/^📅\s*/, ''));
   let h = '';
   if (head) h += `<button class="alert" data-act="anom"><b style="font-weight:600">${esc(head.replace(/^⚠\s*/, '⚠ '))}</b><span class="muted"> · ${S.anomOpen ? 'masquer' : 'voir'}</span>${S.anomOpen ? '<ul>' + items.map(i => '<li>' + esc(i) + '</li>').join('') + '</ul>' : ''}</button>`;
-  rap.forEach(r => h += `<div class="note">${ico.cal}<span>${esc(r)}</span></div>`);
+  rap.forEach(r => h += /solde/i.test(r) ? `<button class="note" data-act="ctrl" style="width:100%;text-align:left">${ico.cal}<span>${esc(r.replace(/dans Paramètres ②/, ''))} <b style="font-weight:500;color:var(--ink);text-decoration:underline">Faire le contrôle ›</b></span></button>` : `<div class="note">${ico.cal}<span>${esc(r)}</span></div>`);
   return h;
 }
 function vueAccueil() {
@@ -482,20 +519,6 @@ function vueJournal() {
   }
   return h;
 }
-function vuePrevu() {
-  const oc = occurrences(S.y, S.m), st = statut(S.y, S.m), d = now.getDate();
-  if (!oc.length) return '<div class="empty">Aucun prélèvement prévu ce mois-ci.</div>';
-  let rev = 0, dep = 0;
-  oc.forEach(o => { if (o.type === 'Revenu') rev += o.v; else if (o.type === 'Retrait') rev += o.v; else dep += o.v; });
-  let h = `<div class="ticket" style="margin-top:6px"><div class="tl"><span>ENTRÉES PRÉVUES</span><span class="c-ok">+${e2(rev)}</span></div><div class="tl"><span>SORTIES PRÉVUES</span><span>−${e2(dep)}</span></div></div>`;
-  h += `<div class="sec"><span>CE MOIS-CI</span><span>${oc.length} LIGNES</span></div>`;
-  oc.forEach(o => {
-    const passe = st === 'passe' || (st === 'cours' && o.jour < d);
-    h += `<div class="jl" style="${passe ? 'opacity:.55' : ''}"><div class="l"><div>${esc(o.lib)}</div><div class="c">le ${o.jour} · ${esc(o.cat)}${passe ? ' · passé ✓' : ''}</div></div><div class="a ${o.type === 'Revenu' ? 'c-ok' : ''}">${o.type === 'Revenu' ? '+' : '−'}${e2(o.v)}</div></div>`;
-  });
-  h += `<div class="note" style="margin-top:14px">Lecture seule pour l'instant : la modification de l'Échéancier arrive dans la prochaine version.</div>`;
-  return h;
-}
 function vueStats() {
   const c = calc(S.y, S.m), cm = catMap();
   const l = Object.keys(c.par).filter(n => cm[n].type === 'Dépense').map(n => ({ n, v: c.par[n].j + c.par[n].e })).filter(x => x.v > 0).sort((a, b) => b.v - a.v);
@@ -530,7 +553,8 @@ function fermer() { $('#veil').classList.remove('on'); $('#sheet').classList.rem
 function montantNum() { const n = parseFloat(String(S.form.montant).replace(',', '.')); return isFinite(n) ? n : 0; }
 function rendreForm() {
   const f = S.form; if (!f) return;
-  if (f.mode === 'reglages') return rendreReglages();
+  const R = { reglages: rendreReglages, budgets: rendreBudgets, cats: rendreCats, catedit: rendreCatEdit, solde: rendreSolde, ech: rendreEch }[f.mode];
+  if (R) return R();
   const fav = favoris(f.type);
   if (f.cat && !fav.includes(f.cat) && typeDe(f.cat) === f.type) fav.unshift(f.cat);
   let chips = fav.map(n => `<button class="chip ${f.cat === n ? 'on' : ''}" data-act="cat" data-cat="${esc(n)}">${esc(n)}</button>`).join('');
@@ -601,19 +625,375 @@ function supprimer(e0) {
   e.deleted = true; e.pending = true; rendre(true); enfiler({ op: 'delete', id: e.id });
 }
 
-/* ================= RÉGLAGES ================= */
-function ouvrirReglages() { S.form = { mode: 'reglages' }; rendreReglages(); $('#veil').classList.add('on'); $('#sheet').classList.add('on'); }
+/* ================= V2 · OUTILS ================= */
+const FREQS = ['Mensuel', 'Trimestriel', 'Semestriel', 'Annuel'];
+const MC = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+const GROUPES = ['Revenus', 'Charges fixes', 'Abonnements', 'Vie courante', 'Loisirs', 'Divers', 'Épargne'];
+const PARMOIS = { Mensuel: 1, Trimestriel: 1 / 3, Semestriel: 1 / 6, Annuel: 1 / 12 };
+const nowYM = () => now.getFullYear() * 12 + now.getMonth() + 1;
+const numTxt = t => { const n = parseFloat(String(t || '').replace(/\s/g, '').replace(',', '.')); return isFinite(n) ? n : NaN; };
+const txtNum = n => n == null || n === '' || isNaN(n) ? '' : String(Math.round(n * 100) / 100).replace('.', ',');
+const typeGroupe = (g, nom) => g === 'Revenus' ? 'Revenu' : g === 'Épargne' ? (/^retrait/i.test(nom) ? 'Retrait' : 'Épargne') : 'Dépense';
+function ouvrirSheet() { $('#veil').classList.add('on'); $('#sheet').classList.add('on'); }
+function enteteSheet(titre, retour) {
+  return `<div class="grab"></div><div class="shead">${retour ? `<button class="back" data-act="go:${retour}">‹ ${titre}</button>` : `<span>${titre}</span>`}<button class="ibtn" data-act="close" aria-label="Fermer">${ico.x}</button></div>`;
+}
+function lierChamps() {
+  document.querySelectorAll('#sheetIn [data-f]').forEach(i => i.addEventListener('input', ev => {
+    S.form[i.dataset.f] = ev.target.value;
+    if (S.form.mode === 'solde') majSolde();
+    if (S.form.mode === 'ech') majEchApercu();
+  }));
+}
+function usage(nom) { return S.journal.filter(e => !e.deleted && e.cat === nom).length + S.data.echeancier.filter(e => !e.deleted && e.cat === nom).length; }
+function appel(action, payload) { enfiler({ op: 'call', id: uid(), action, payload }); }
+
+/* ================= V2 · PRÉVU ================= */
+function echTermine(e) { return e.i && (e.i * 12 + (e.freq === 'Mensuel' ? (e.g || 12) : 12)) < nowYM(); }
+function echResume(e) {
+  const p = [e.freq.toLowerCase(), 'le ' + (e.jour || 1)];
+  if (e.freq !== 'Mensuel') p.push('en ' + MC[(e.f || 1) - 1]);
+  if (e.h) p.push('dès ' + (e.freq === 'Mensuel' ? MC[(e.f || 1) - 1] + ' ' : '') + e.h);
+  if (e.i) p.push("jusqu'à " + (e.freq === 'Mensuel' ? MC[(e.g || 12) - 1] + ' ' : '') + e.i);
+  return p.join(' · ');
+}
+function prochainPassage(e) {
+  for (let k = 0; k < 36; k++) {
+    const t = nowYM() + k, y = Math.floor((t - 1) / 12), m = ((t - 1) % 12) + 1;
+    if (echMontant(Object.assign({}, e, { pause: false }), y, m) && (k > 0 || (e.jour || 1) >= now.getDate())) return `${e.jour || 1} ${MC[m - 1]} ${y}`;
+  }
+  return null;
+}
+function vuePrevu() {
+  const vue = S.prevuVue || 'mois';
+  let h = `<div class="seg" style="margin-top:4px">${[['mois', 'CE MOIS-CI'], ['tout', "TOUT L'ÉCHÉANCIER"]].map(([k, l]) => `<button class="${vue === k ? 'on' : ''}" data-act="pv:${k}">${l}</button>`).join('')}</div>`;
+  h += vue === 'mois' ? prevuMois() : prevuTout();
+  h += `<button class="add" data-act="ech-new">+ AJOUTER UN PRÉLÈVEMENT OU UN REVENU</button>`;
+  return h;
+}
+function prevuMois() {
+  const oc = occurrences(S.y, S.m), st = statut(S.y, S.m), d = now.getDate();
+  if (!oc.length) return '<div class="empty">Aucun prélèvement prévu ce mois-ci.</div>';
+  let rev = 0, dep = 0;
+  oc.forEach(o => { if (o.type === 'Revenu' || o.type === 'Retrait') rev += o.v; else dep += o.v; });
+  let h = `<div class="ticket" style="margin-top:10px"><div class="tl"><span>ENTRÉES PRÉVUES</span><span class="c-ok">+${e2(rev)}</span></div><div class="tl"><span>SORTIES PRÉVUES</span><span>${neg2(dep)}</span></div></div>`;
+  h += `<div class="sec"><span>${esc(moisLabel(S.y, S.m).toUpperCase())}</span><span>${oc.length} LIGNES</span></div>`;
+  oc.forEach(o => {
+    const passe = st === 'passe' || (st === 'cours' && o.jour < d), plus = o.type === 'Revenu' || o.type === 'Retrait';
+    h += `<button class="jl" data-act="ech" data-id="${o.id}" style="${passe ? 'opacity:.55' : ''}"><div class="l"><div>${esc(o.lib)}</div><div class="c">le ${o.jour} · ${esc(o.cat)}${passe ? ' · passé ✓' : ''}</div></div><div class="a ${plus ? 'c-ok' : ''}">${plus ? '+' : '−'}${e2(o.v)}</div></button>`;
+  });
+  return h;
+}
+function prevuTout() {
+  const cm = catMap(), l = S.data.echeancier.filter(e => !e.deleted);
+  const ordreG = ['Revenus', 'Charges fixes', 'Abonnements', 'Épargne', 'Vie courante', 'Loisirs', 'Divers'];
+  const actifs = l.filter(e => !echTermine(e)), finis = l.filter(echTermine);
+  const ligne = e => {
+    const c = cm[e.cat], plus = c && (c.type === 'Revenu' || c.type === 'Retrait');
+    return `<button class="jl" data-act="ech" data-id="${e.id}" style="${e.pause ? 'opacity:.55' : ''}"><div class="l"><div>${esc(e.lib)} ${e.pause ? '<span class="stamp s-warn" style="margin-left:4px">PAUSE</span>' : ''}${e.pending ? ' <span class="c-mute" style="font-size:11px">· envoi…</span>' : ''}</div><div class="c">${esc(echResume(e))}</div></div><div class="a ${plus ? 'c-ok' : ''}">${plus ? '+' : ''}${e2(e.montant || 0)}</div></button>`;
+  };
+  let h = '';
+  ordreG.forEach(g => {
+    const z = actifs.filter(e => cm[e.cat] && cm[e.cat].groupe === g); if (!z.length) return;
+    const tot = z.filter(e => !e.pause).reduce((s, e) => s + (e.montant || 0) * (PARMOIS[e.freq] || 1 / 12), 0);
+    h += `<div class="sec"><span>${esc(g.toUpperCase())}</span><span>≈ ${e0(tot)}/MOIS</span></div>` + z.map(ligne).join('');
+  });
+  const orph = actifs.filter(e => !cm[e.cat]);
+  if (orph.length) h += `<div class="sec"><span class="c-bad">CATÉGORIE INCONNUE</span></div>` + orph.map(ligne).join('');
+  if (finis.length) {
+    h += `<button class="sec" style="width:100%" data-act="pvfin"><span>TERMINÉS (${finis.length})</span><span>${S.pvFin ? 'MASQUER ▴' : 'VOIR ▾'}</span></button>`;
+    if (S.pvFin) h += finis.map(ligne).join('');
+  }
+  return h;
+}
+
+/* ---- formulaire Échéancier ---- */
+function ouvrirEch(x) {
+  const ym = { y: now.getFullYear(), m: now.getMonth() + 1 };
+  S.form = x ? { mode: 'ech', id: x.id, lib: x.lib, montant: txtNum(x.montant), cat: x.cat, freq: x.freq || 'Mensuel', jour: x.jour || 1, f: x.f || 1, g: x.g || 12, h: x.h || null, i: x.i || null, pause: !!x.pause, all: false, arm: false }
+    : { mode: 'ech', id: null, lib: '', montant: '', cat: null, freq: 'Mensuel', jour: Math.min(28, now.getDate()), f: 1, g: 12, h: ym.y, i: null, pause: false, all: false, arm: false };
+  if (!x) S.form.f = ym.m;
+  rendreForm(); ouvrirSheet();
+}
+function rendreEch() {
+  const f = S.form, mens = f.freq === 'Mensuel';
+  const deb = f.h ? (mens ? MC[f.f - 1] + ' ' + f.h : String(f.h)) : 'Toujours';
+  const fin = f.i ? (mens ? MC[f.g - 1] + ' ' + f.i : String(f.i)) : 'Jamais';
+  const stp = (lab, k, val, clr) => `<div class="stp"><span>${lab}</span><span class="v"><button data-act="stp" data-s="${k}" data-d="-1" aria-label="moins">‹</button><span>${val}</span><button data-act="stp" data-s="${k}" data-d="1" aria-label="plus">›</button>${clr ? `<button data-act="stp" data-s="${k}" data-d="x" aria-label="effacer" style="font-size:13px">✕</button>` : ''}</span></div>`;
+  const sel = f.cat ? `<button class="chip on" data-act="ech-allcat">${esc(f.cat)} ▾</button>` : `<button class="chip" data-act="ech-allcat">Choisir une catégorie ▾</button>`;
+  let tout = '';
+  if (f.all) {
+    GROUPES.forEach(g => { const l = cats().filter(c => c.groupe === g); if (!l.length) return; tout += `<div class="grp">${esc(g.toUpperCase())}</div><div class="chips">` + l.map(c => `<button class="chip ${f.cat === c.nom ? 'on' : ''}" data-act="ech-cat" data-cat="${esc(c.nom)}">${esc(c.nom)}</button>`).join('') + '</div>'; });
+  }
+  const x = f.id ? trouverEch(f.id) : null;
+  $('#sheetIn').innerHTML = enteteSheet(f.id ? 'MODIFIER LE PRÉLÈVEMENT' : 'NOUVEAU PRÉLÈVEMENT') + `
+    <input class="libin" data-f="lib" placeholder="Libellé (Loyer, Netflix, Salaire…)" value="${esc(f.lib)}" maxlength="80" style="margin-top:14px">
+    <input class="libin" data-f="montant" inputmode="decimal" placeholder="Montant en €" value="${esc(f.montant)}" style="margin-top:0">
+    <div class="chips">${sel}</div>${tout}
+    <div class="seg">${FREQS.map(q => `<button class="${f.freq === q ? 'on' : ''}" data-act="ech-freq" data-t="${q}">${{ Mensuel: 'MENSUEL', Trimestriel: 'TRIM.', Semestriel: 'SEMEST.', Annuel: 'ANNUEL' }[q]}</button>`).join('')}</div>
+    ${stp('JOUR DU MOIS', 'jour', 'le ' + f.jour)}
+    ${mens ? '' : stp(f.freq === 'Annuel' ? 'TOMBE EN' : 'PREMIER MOIS', 'f', MC[f.f - 1])}
+    ${stp(mens ? 'DÉBUT' : 'DEPUIS', 'deb', deb, !!f.h)}
+    ${stp(mens ? 'FIN' : "JUSQU'EN", 'fin', fin, !!f.i)}
+    <div class="stp"><span>EN PAUSE</span><button class="tgl ${f.pause ? 'on' : ''}" data-act="ech-pause" aria-label="Pause"><i></i></button></div>
+    <div class="hint" id="eap" style="margin-top:10px"></div>
+    <div class="err" id="ferr"></div>
+    <button class="go" data-act="ech-save">ENREGISTRER</button>
+    ${x && !echTermine(x) ? `<button class="ghost" data-act="ech-stop">ARRÊTER APRÈS ${esc(MOIS[now.getMonth()].toUpperCase())}</button>` : ''}
+    ${x ? `<button class="danger ${f.arm ? 'armed' : ''}" data-act="ech-del">${f.arm ? 'TOUCHE ENCORE POUR SUPPRIMER' : 'SUPPRIMER LA LIGNE'}</button>` : ''}`;
+  lierChamps(); majEchApercu();
+}
+function echDepuisForm() {
+  const f = S.form;
+  return { lib: String(f.lib || '').trim(), cat: f.cat, montant: Math.round(numTxt(f.montant) * 100) / 100, freq: f.freq, jour: f.jour, f: f.f, g: f.freq === 'Mensuel' ? f.g : (f.g || 12), h: f.h || null, i: f.i || null, pause: f.pause };
+}
+function majEchApercu() {
+  const z = $('#eap'); if (!z) return;
+  const e = echDepuisForm();
+  if (!(e.montant > 0) || !e.cat) { z.innerHTML = '<span class="muted">Montant et catégorie, et c\'est bon</span>'; return; }
+  if (e.h && e.i && (e.i * 12 + e.g) < (e.h * 12 + e.f)) { z.innerHTML = '<span class="c-bad">La fin est avant le début</span>'; return; }
+  const p = prochainPassage(e);
+  z.innerHTML = e.pause ? 'En pause : ne compte plus dans le budget' : p ? `Prochain passage : <b>${p}</b> · ≈ ${e0(e.montant * (PARMOIS[e.freq] || 1))}/mois` : '<span class="c-bad">Aucun passage à venir avec ces dates</span>';
+}
+function stepEch(k, d) {
+  const f = S.form, mens = f.freq === 'Mensuel', cy = now.getFullYear(), cm = now.getMonth() + 1;
+  if (k === 'jour') f.jour = ((f.jour - 1 + d + 31) % 31) + 1;
+  else if (k === 'f') f.f = ((f.f - 1 + d + 12) % 12) + 1;
+  else if (k === 'deb' || k === 'fin') {
+    const Y = k === 'deb' ? 'h' : 'i', M = k === 'deb' ? 'f' : 'g';
+    if (d === 'x') { f[Y] = null; if (mens) f[M] = k === 'deb' ? 1 : 12; }
+    else if (!f[Y]) { f[Y] = cy; if (mens) f[M] = cm; }
+    else if (mens) { let t = f[Y] * 12 + f[M] - 1 + d; f[Y] = Math.floor(t / 12); f[M] = (t % 12) + 1; }
+    else f[Y] += d;
+  }
+  rendreEch();
+}
+function enregistrerEch(stop) {
+  const f = S.form, e = echDepuisForm();
+  if (stop) { e.i = now.getFullYear(); if (e.freq === 'Mensuel') e.g = now.getMonth() + 1; }
+  if (!e.lib) return ($('#ferr').textContent = 'Donne un libellé');
+  if (!(e.montant > 0)) return ($('#ferr').textContent = 'Tape un montant (ex. 12,50)');
+  if (!e.cat) return ($('#ferr').textContent = 'Choisis une catégorie');
+  if (e.h && e.i && (e.i * 12 + e.g) < (e.h * 12 + e.f)) return ($('#ferr').textContent = 'La fin est avant le début');
+  let x = f.id ? trouverEch(f.id) : null;
+  if (x) Object.assign(x, e, { pending: true });
+  else { x = Object.assign({ id: uid(), ligne: null, srv: null, pending: true }, e); S.data.echeancier.push(x); }
+  fermer(); rendre(true); toast(stop ? 'Arrêté après ' + MOIS[now.getMonth()] : 'Échéancier mis à jour');
+  enfiler({ op: 'ech-save', id: x.id });
+}
+
+/* ================= V2 · RÉGLAGES ================= */
+function ouvrirReglages() { S.form = { mode: 'reglages' }; rendreForm(); ouvrirSheet(); }
 function rendreReglages() {
   const t = LS.get('theme', 'auto');
-  $('#sheetIn').innerHTML = `<div class="grab"></div><div class="shead"><span>RÉGLAGES</span><button class="ibtn" data-act="close" aria-label="Fermer">${ico.x}</button></div>
+  const bud = cats().filter(c => VAR.includes(c.groupe) && c.type === 'Dépense' && c.budget > 0).reduce((s, c) => s + c.budget, 0);
+  const lc = LS.get('controles', [])[0];
+  $('#sheetIn').innerHTML = enteteSheet('RÉGLAGES') + `
+    <div class="grp" style="margin-top:16px">MON BUDGET</div>
+    <button class="opt" data-act="go:budgets"><span>Budgets par catégorie</span><span class="muted mono" style="font-size:12px">${e0(bud)}/mois ›</span></button>
+    <button class="opt" data-act="go:cats"><span>Catégories</span><span class="muted mono" style="font-size:12px">${cats().length} · ${S.data.libres || 0} place${(S.data.libres || 0) > 1 ? 's' : ''} libre${(S.data.libres || 0) > 1 ? 's' : ''} ›</span></button>
+    <button class="opt" data-act="go:solde"><span>Contrôle du solde</span><span class="muted mono" style="font-size:12px">${lc ? 'dernier : ' + lc.date : 'jamais fait'} ›</span></button>
     <div class="grp" style="margin-top:16px">APPARENCE</div>
     <div class="seg">${[['auto', 'AUTO'], ['light', 'CLAIR'], ['dark', 'SOMBRE']].map(([k, l]) => `<button class="${t === k ? 'on' : ''}" data-act="theme" data-t="${k}">${l}</button>`).join('')}</div>
     <div class="grp" style="margin-top:16px">DONNÉES</div>
     <button class="opt" data-act="refresh"><span>Actualiser depuis le fichier</span><span class="muted mono" style="font-size:12px">${S.queue.length ? S.queue.length + ' en attente' : 'à jour'}</span></button>
     <button class="opt" data-act="logout"><span>Changer de clé d'accès</span><span class="muted">›</span></button>
-    <div class="grp" style="margin-top:16px">BIENTÔT</div>
-    <div class="note" style="margin-top:0">Budgets, catégories (ajouter, retirer, trier), Échéancier et contrôle du solde de fin de mois arrivent dans la version 2.</div>
     <p class="muted mono" style="font-size:11px;text-align:center;margin-top:22px">JAUGE · V${VERSION}</p>`;
+}
+
+/* ---- budgets ---- */
+function rendreBudgets() {
+  const f = S.form, l = cats().filter(c => VAR.includes(c.groupe) && c.type === 'Dépense');
+  const tot = l.reduce((s, c) => s + (c.budget > 0 ? c.budget : 0), 0);
+  const t = nowYM() + 1, ny = Math.floor((t - 1) / 12), nm = ((t - 1) % 12) + 1, b = calc(ny, nm);
+  const marge = b.dispo - tot - b.budVar + tot;
+  let h = enteteSheet('RÉGLAGES', 'reglages') + `
+    <div class="ticket" style="margin-top:14px">
+      <div class="tl"><span>DISPO APRÈS CHARGES (${MC[nm - 1].toUpperCase()})</span><span>${e2(b.dispo)}</span></div>
+      <div class="tl"><span>BUDGETS DU MOIS</span><span>${neg2(b.budVar)}</span></div>
+      <hr class="dash"><div class="tl tot"><span>MARGE</span><span class="${marge < 0 ? 'c-bad' : 'c-ok'}">${marge >= 0 ? '+' : ''}${e2(marge)}</span></div></div>
+    <div class="note" style="margin-top:12px">Mensuel : le budget repart à zéro chaque mois. Annuel : ce que tu n'as pas dépensé se reporte sur les mois suivants. Sans alerte : suivi sans tampon.</div>`;
+  GROUPES.filter(g => VAR.includes(g)).forEach(g => {
+    const z = l.filter(c => c.groupe === g); if (!z.length) return;
+    h += `<div class="grp" style="margin-top:16px">${esc(g.toUpperCase())}</div>`;
+    z.forEach(c => {
+      if (f.edit === c.nom) {
+        h += `<div style="padding:8px 0;border-bottom:1px dashed var(--rule)"><div class="mono" style="font-size:13px;text-transform:uppercase">${esc(c.nom)}</div>
+          <input class="libin" data-f="val" inputmode="decimal" placeholder="Budget par mois en €" value="${esc(f.val)}" style="margin:8px 0 4px">
+          <div class="seg" style="margin:4px 0 8px">${['Mensuel', 'Annuel', 'Sans alerte'].map(q => `<button class="${f.suivi === q ? 'on' : ''}" data-act="bud-suivi" data-t="${q}">${q.toUpperCase()}</button>`).join('')}</div>
+          <div class="err" id="ferr"></div><button class="go" data-act="bud-ok" style="height:44px">OK</button></div>`;
+      } else h += `<button class="opt" data-act="bud-edit" data-cat="${esc(c.nom)}"><span>${esc(c.nom)}</span><span class="mono" style="font-size:13px">${c.budget > 0 ? e0(c.budget) : '<span class="muted">aucun</span>'} <span class="muted" style="font-size:11px">${esc((c.suivi || '').toLowerCase())}</span></span></button>`;
+    });
+  });
+  $('#sheetIn').innerHTML = h; lierChamps();
+}
+function okBudget() {
+  const f = S.form, v = String(f.val || '').trim() === '' ? 0 : numTxt(f.val);
+  if (isNaN(v) || v < 0) { $('#ferr').textContent = 'Montant incorrect'; return; }
+  const c = cats().find(x => x.nom === f.edit); if (!c) return;
+  c.budget = v > 0 ? Math.round(v * 100) / 100 : null; c.suivi = f.suivi;
+  appel('budget', { nom: c.nom, budget: c.budget || 0, suivi: c.suivi });
+  f.edit = null; memo = new Map(); rendreBudgets(); rendre(true);
+}
+
+/* ---- catégories ---- */
+function rendreCats() {
+  const parG = {}; cats().forEach(c => (parG[c.groupe || 'Sans groupe'] = parG[c.groupe || 'Sans groupe'] || []).push(c));
+  let h = enteteSheet('RÉGLAGES', 'reglages');
+  h += (S.data.libres || 0) > 0 ? `<button class="add" data-act="cat-new">+ NOUVELLE CATÉGORIE</button>`
+    : `<div class="note" style="margin-top:14px">Plus de place libre dans le fichier : retire une catégorie inutilisée pour en ajouter une.</div>`;
+  h += `<div class="note">Les flèches règlent l'ordre d'affichage dans l'appli. Touche une catégorie pour la renommer, changer son groupe ou la retirer.</div>`;
+  GROUPES.concat(['Sans groupe']).forEach(g => {
+    const z = parG[g]; if (!z) return;
+    h += `<div class="grp" style="margin-top:16px">${esc(g.toUpperCase())}</div>`;
+    z.forEach((c, i) => {
+      h += `<div class="crow"><button class="nm" data-act="cat-open" data-cat="${esc(c.nom)}"><div>${esc(c.nom)}</div><div class="c mono" style="font-size:11px;color:var(--ink3)">${usage(c.nom)} ligne(s)</div></button>
+        <button class="mv" data-act="cat-mv" data-cat="${esc(c.nom)}" data-d="-1" aria-label="Monter" ${i === 0 ? 'style="visibility:hidden"' : ''}>▲</button>
+        <button class="mv" data-act="cat-mv" data-cat="${esc(c.nom)}" data-d="1" aria-label="Descendre" ${i === z.length - 1 ? 'style="visibility:hidden"' : ''}>▼</button></div>`;
+    });
+  });
+  $('#sheetIn').innerHTML = h;
+}
+function deplacerCat(nom, d) {
+  const l = cats(), c = l.find(x => x.nom === nom), meme = l.filter(x => x.groupe === c.groupe), i = meme.indexOf(c), autre = meme[i + d];
+  if (!autre) return;
+  const a = l.indexOf(c), b = l.indexOf(autre); l[a] = autre; l[b] = c;
+  LS.set('ordre', l.map(x => x.nom)); sauver(); memo = new Map(); rendreCats();
+}
+function ouvrirCat(nom) {
+  const c = nom ? cats().find(x => x.nom === nom) : null;
+  S.form = c ? { mode: 'catedit', ancien: c.nom, nom: c.nom, groupe: c.groupe, arm: false, cible: null }
+    : { mode: 'catedit', ancien: null, nom: '', groupe: 'Loisirs', budget: '', suivi: 'Annuel', arm: false };
+  rendreForm();
+}
+function rendreCatEdit() {
+  const f = S.form, n = f.ancien ? usage(f.ancien) : 0;
+  let h = enteteSheet('CATÉGORIES', 'cats') + `
+    <input class="libin" data-f="nom" placeholder="Nom de la catégorie" value="${esc(f.nom)}" maxlength="40" style="margin-top:14px">
+    <div class="grp">GROUPE</div><div class="chips">${GROUPES.map(g => `<button class="chip ${f.groupe === g ? 'on' : ''}" data-act="cat-g" data-t="${esc(g)}">${esc(g)}</button>`).join('')}</div>`;
+  if (!f.ancien && VAR.includes(f.groupe)) h += `<div class="grp" style="margin-top:14px">BUDGET (FACULTATIF)</div>
+    <input class="libin" data-f="budget" inputmode="decimal" placeholder="Budget par mois en €" value="${esc(f.budget)}" style="margin-top:0">
+    <div class="seg" style="margin-top:0">${['Mensuel', 'Annuel', 'Sans alerte'].map(q => `<button class="${f.suivi === q ? 'on' : ''}" data-act="cat-suivi" data-t="${q}">${q.toUpperCase()}</button>`).join('')}</div>`;
+  if (f.ancien && f.nom.trim() && f.nom.trim() !== f.ancien && n) h += `<div class="note">Les ${n} ligne(s) du Journal et de l'Échéancier seront renommées aussi.</div>`;
+  h += `<div class="err" id="ferr" style="margin-top:10px"></div><button class="go" data-act="cat-save">${f.ancien ? 'ENREGISTRER' : 'CRÉER LA CATÉGORIE'}</button>`;
+  if (f.ancien) {
+    h += `<div class="grp" style="margin-top:22px">RETIRER LA CATÉGORIE</div>`;
+    if (!n) h += `<button class="danger ${f.arm ? 'armed' : ''}" data-act="cat-del">${f.arm ? 'TOUCHE ENCORE POUR RETIRER' : 'RETIRER (AUCUNE LIGNE)'}</button>`;
+    else {
+      const fam = typeGroupe(f.groupe, f.ancien) === 'Revenu' ? ['Revenu'] : typeGroupe(f.groupe, f.ancien) === 'Dépense' ? ['Dépense'] : ['Épargne', 'Retrait'];
+      h += `<div class="note" style="margin-top:0">${n} ligne(s) l'utilisent : choisis où les déplacer.</div><div class="chips" style="margin-top:8px">` +
+        cats().filter(c => c.nom !== f.ancien && fam.includes(c.type)).map(c => `<button class="chip ${f.cible === c.nom ? 'on' : ''}" data-act="cat-cible" data-cat="${esc(c.nom)}">${esc(c.nom)}</button>`).join('') + '</div>';
+      if (f.cible) h += `<button class="danger ${f.arm ? 'armed' : ''}" data-act="cat-del">${f.arm ? 'TOUCHE ENCORE POUR CONFIRMER' : 'DÉPLACER VERS ' + esc(f.cible.toUpperCase()) + ' ET RETIRER'}</button>`;
+    }
+  }
+  $('#sheetIn').innerHTML = h; lierChamps();
+  const i = $('#sheetIn [data-f=nom]'); if (i) i.addEventListener('input', () => { if (f.ancien) { const z = $('#ferr'); if (z) z.textContent = ''; } });
+}
+function renommerLocal(ancien, nouveau) {
+  S.journal.forEach(e => { if (e.cat === ancien) e.cat = nouveau; });
+  S.data.echeancier.forEach(e => { if (e.cat === ancien) e.cat = nouveau; });
+  LS.set('ordre', LS.get('ordre', []).map(n => n === ancien ? nouveau : n));
+}
+function enregistrerCat() {
+  const f = S.form, nom = String(f.nom || '').trim();
+  if (!nom) return ($('#ferr').textContent = 'Donne un nom');
+  if (/libre/i.test(nom)) return ($('#ferr').textContent = 'Choisis un autre nom');
+  if (nom !== f.ancien && cats().some(c => c.nom.toLowerCase() === nom.toLowerCase())) return ($('#ferr').textContent = 'Ce nom existe déjà');
+  if (f.ancien) {
+    const c = cats().find(x => x.nom === f.ancien);
+    c.nom = nom; c.groupe = f.groupe; c.type = typeGroupe(f.groupe, nom);
+    if (nom !== f.ancien) renommerLocal(f.ancien, nom);
+    appel('cat-edit', { ancien: f.ancien, nom, groupe: f.groupe });
+    toast('Catégorie enregistrée');
+  } else {
+    const b = numTxt(f.budget);
+    S.data.categories.push({ nom, groupe: f.groupe, type: typeGroupe(f.groupe, nom), budget: b > 0 ? b : null, suivi: VAR.includes(f.groupe) ? f.suivi : '' });
+    S.data.libres = Math.max(0, (S.data.libres || 1) - 1);
+    appel('cat-add', { nom, groupe: f.groupe, budget: b > 0 ? b : 0, suivi: f.suivi });
+    toast('Catégorie créée');
+  }
+  sauver(); memo = new Map(); S.form = { mode: 'cats' }; rendreForm(); rendre(true);
+}
+function retirerCat() {
+  const f = S.form;
+  if (!f.arm) { f.arm = true; rendreCatEdit(); return; }
+  if (f.cible) renommerLocal(f.ancien, f.cible);
+  S.data.categories = S.data.categories.filter(c => c.nom !== f.ancien);
+  S.data.libres = (S.data.libres || 0) + 1;
+  appel('cat-del', { nom: f.ancien, cible: f.cible || null });
+  toast(f.cible ? 'Lignes déplacées, catégorie retirée' : 'Catégorie retirée');
+  sauver(); memo = new Map(); S.form = { mode: 'cats' }; rendreForm(); rendre(true);
+}
+
+/* ---- contrôle du solde ---- */
+function signe(type) { return type === 'Revenu' || type === 'Retrait' ? 1 : -1; }
+function soldeDepart(y) { const s = S.data.soldes ? S.data.soldes[String(y)] : null; return typeof s === 'number' && Math.abs(s) > 1 ? s : null; }
+function soldeCalcule(y, m) {
+  const s0 = soldeDepart(y); if (s0 == null) return null;
+  let t = s0; for (let k = 1; k < m; k++) t += calc(y, k).restant;
+  if (statut(y, m) !== 'cours') return t + calc(y, m).restant;
+  const cm = catMap(), d = now.getDate();
+  S.journal.forEach(e => { const c = cm[e.cat]; if (!e.deleted && c && e.y === y && e.m === m && e.montant > 0) t += signe(c.type) * e.montant; });
+  occurrences(y, m).forEach(o => { if (o.jour <= d) t += signe(o.type) * o.v; });
+  return t;
+}
+function ouvrirSolde() {
+  const d = now.getDate(); let y = now.getFullYear(), m = now.getMonth() + 1;
+  if (d < 25) { m--; if (m < 1) { m = 12; y--; } }
+  const c = S.data.controle || {};
+  S.form = { mode: 'solde', y, m, banque: '', especes: c.especes ? txtNum(c.especes) : '', dep: '', neg: false };
+  rendreForm();
+}
+function rendreSolde() {
+  const f = S.form, s0 = soldeDepart(f.y), cours = statut(f.y, f.m) === 'cours';
+  let h = enteteSheet('RÉGLAGES', 'reglages') + `<div class="mrow" style="margin:14px 0 4px"><button class="mbtn" data-act="sm:-1" aria-label="Mois précédent">‹</button><span>${esc(moisLabel(f.y, f.m).toUpperCase())}</span><button class="mbtn" data-act="sm:1" aria-label="Mois suivant">›</button></div>`;
+  if (s0 == null) {
+    h += `<div class="note">Le solde au 1er janvier ${f.y} n'est pas saisi : sans lui, le calcul part de zéro. Tape le solde de ton relevé du 1er janvier.</div>
+      <input class="libin" data-f="dep" inputmode="decimal" placeholder="Solde au 1er janvier ${f.y} en €" value="${esc(f.dep)}">
+      <div class="err" id="ferr"></div><button class="go" data-act="dep-ok">ENREGISTRER LE SOLDE DE DÉPART</button>`;
+  } else {
+    h += `<div class="ticket" style="margin-top:10px"><div class="tl"><span>SOLDE AU 1ER JANVIER</span><span>${e2(s0)}</span></div>
+      <div class="tl"><span>CALCULÉ ${cours ? "AUJOURD'HUI" : 'FIN ' + MC[f.m - 1].toUpperCase()}</span><span id="scal">${e2(soldeCalcule(f.y, f.m))}</span></div></div>
+      <div class="grp" style="margin-top:16px">CE QUE DIT TA BANQUE</div>
+      <div style="display:flex;gap:8px"><button class="chip ${f.neg ? 'on' : ''}" data-act="s-neg" style="height:42px;margin-top:10px" aria-label="Solde négatif">±</button>
+      <input class="libin" data-f="banque" inputmode="decimal" placeholder="Solde de ton compte en €" value="${esc(f.banque)}"></div>
+      <input class="libin" data-f="especes" inputmode="decimal" placeholder="Espèces dans ton portefeuille (facultatif)" value="${esc(f.especes)}" style="margin-top:0">
+      <div class="hint" id="secart" style="margin-top:6px"></div><div class="err" id="ferr"></div>
+      <button class="go" data-act="s-ok">ENREGISTRER LE CONTRÔLE</button>
+      <div class="note">${cours ? 'En cours de mois, le calcul compte tes saisies du mois et les prélèvements dont la date est passée.' : 'À faire quand toutes les dépenses du mois sont saisies.'}</div>`;
+  }
+  const hist = LS.get('controles', []).slice(0, 5);
+  if (hist.length) h += `<div class="grp" style="margin-top:18px">DERNIERS CONTRÔLES</div>` + hist.map(c => `<div class="up"><span>${esc(c.date)}</span><span>${esc(c.mois)}</span><span class="${Math.abs(c.ecart) <= 5 ? 'c-ok' : 'c-bad'}">${c.ecart >= 0 ? '+' : ''}${e2(c.ecart)}</span></div>`).join('');
+  $('#sheetIn').innerHTML = h; lierChamps(); majSolde();
+}
+function ecartSolde() {
+  const f = S.form, b = numTxt(f.banque); if (isNaN(b)) return null;
+  const cal = soldeCalcule(f.y, f.m); if (cal == null) return null;
+  return (f.neg ? -b : b) + (numTxt(f.especes) || 0) - cal;
+}
+function majSolde() {
+  const z = $('#secart'); if (!z) return;
+  const e = ecartSolde();
+  z.innerHTML = e == null ? '<span class="muted">Tape le solde affiché par ta banque</span>' : Math.abs(e) <= 5 ? `<span class="c-ok">Écart ${e >= 0 ? '+' : ''}${e2(e)} € : tout est saisi ✓</span>`
+    : `<span class="c-bad">Écart ${e >= 0 ? '+' : ''}${e2(e)} € : ${e < 0 ? 'une dépense oubliée dans le Journal, ou un prélèvement plus cher que prévu ?' : 'un revenu oublié, ou une dépense saisie deux fois ?'}</span>`;
+}
+function okSolde() {
+  const f = S.form, e = ecartSolde();
+  if (e == null) { $('#ferr').textContent = 'Tape le solde de ton compte'; return; }
+  const b = numTxt(f.banque) * (f.neg ? -1 : 1), esp = numTxt(f.especes) || 0;
+  appel('solde-ctrl', { mois: MOIS[f.m - 1][0].toUpperCase() + MOIS[f.m - 1].slice(1), solde: b, especes: esp });
+  S.data.controle = { mois: MOIS[f.m - 1], solde: b, especes: esp };
+  const hist = LS.get('controles', []);
+  hist.unshift({ date: now.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }), mois: MC[f.m - 1] + ' ' + f.y, ecart: Math.round(e * 100) / 100 });
+  LS.set('controles', hist.slice(0, 24));
+  toast(Math.abs(e) <= 5 ? 'Contrôle OK, tout est saisi' : 'Contrôle enregistré : écart de ' + e0(e));
+  rendreSolde();
+}
+function okDepart() {
+  const f = S.form, v = numTxt(f.dep);
+  if (isNaN(v)) { $('#ferr').textContent = 'Montant incorrect'; return; }
+  S.data.soldes = S.data.soldes || {}; S.data.soldes[String(f.y)] = v;
+  appel('solde-dep', { annee: f.y, valeur: v }); sauver(); memo = new Map(); rendreSolde(); rendre(true);
 }
 
 /* ================= VERROU ================= */
@@ -633,7 +1013,7 @@ function verrouiller(msg) {
     try {
       const r = await api('data');
       if (!r.ok) { go.textContent = 'OUVRIR'; $('#kerr').textContent = r.message || 'Clé incorrecte'; return; }
-      LS.set('key', v); S.data = r.data; S.journal = entriesFromData(r.data); S.queue = []; sauver();
+      LS.set('key', v); S.data = prepData(r.data); S.journal = entriesFromData(r.data); S.queue = []; sauver();
       l.hidden = true; S.lastFetch = Date.now(); setSync('ok'); rendre(); pomper();
     } catch (e) { go.textContent = 'OUVRIR'; $('#kerr').textContent = 'Connexion impossible. Vérifie ta connexion internet.'; }
   };
@@ -652,10 +1032,11 @@ function toast(txt, btn, fn) {
 
 /* ================= ÉVÉNEMENTS ================= */
 document.addEventListener('click', ev => {
-  const k = ev.target.closest('[data-k]'); if (k && S.form) { touche(k.dataset.k); return; }
+  const k = ev.target.closest('[data-k]'); if (k && S.form && S.form.montant !== undefined && !S.form.mode.match(/ech|cat|bud|solde|regl/)) { touche(k.dataset.k); return; }
   const el = ev.target.closest('[data-act]'); if (!el) return;
   const a = el.dataset.act;
   if (a.startsWith('tab:')) { S.tab = a.slice(4); if (S.tab !== 'journal') { S.filtre.cat = null; } rendre(); scrollTo(0, 0); return; }
+  if (a.startsWith('sm:')) { const f = S.form; let m = f.m + +a.slice(3), y = f.y; if (m < 1) { m = 12; y--; } if (m > 12) { m = 1; y++; } if (y * 12 + m > nowYM()) return; f.y = y; f.m = m; rendreSolde(); return; }
   if (a.startsWith('fm:')) { const f = S.form, d = +a.slice(3); let m = f.m + d, y = f.y; if (m < 1) { m = 12; y--; } if (m > 12) { m = 1; y++; } f.y = y; f.m = m; rendreForm(); return; }
   switch (a) {
     case 'prev': S.m--; if (S.m < 1) { S.m = 12; S.y--; } rendre(); break;
@@ -674,6 +1055,38 @@ document.addEventListener('click', ev => {
     case 'all': S.form.all = !S.form.all; rendreForm(); break;
     case 'save': enregistrer(); break;
     case 'del': if (!S.form.arm) { S.form.arm = true; rendreForm(); } else { const e = trouver(S.form.id) || S.journal.find(x => x.row === S.form.row && !x.deleted); fermer(); if (e) { supprimer(e); toast('Ligne supprimée'); } } break;
+    case 'go:reglages': S.form = { mode: 'reglages' }; rendreForm(); break;
+    case 'go:budgets': S.form = { mode: 'budgets', edit: null }; rendreForm(); break;
+    case 'go:cats': S.form = { mode: 'cats' }; rendreForm(); break;
+    case 'go:solde': ouvrirSolde(); break;
+    case 'ctrl': ouvrirSolde(); ouvrirSheet(); break;
+    case 'pv:mois': S.prevuVue = 'mois'; rendre(true); break;
+    case 'pv:tout': S.prevuVue = 'tout'; rendre(true); break;
+    case 'pvfin': S.pvFin = !S.pvFin; rendre(true); break;
+    case 'ech': { const x = trouverEch(el.dataset.id); if (x) ouvrirEch(x); break; }
+    case 'ech-new': ouvrirEch(null); break;
+    case 'ech-allcat': S.form.all = !S.form.all; rendreEch(); break;
+    case 'ech-cat': S.form.cat = el.dataset.cat; S.form.all = false; rendreEch(); break;
+    case 'ech-freq': S.form.freq = el.dataset.t; if (S.form.freq !== 'Mensuel') S.form.g = 12; rendreEch(); break;
+    case 'ech-pause': S.form.pause = !S.form.pause; rendreEch(); break;
+    case 'stp': stepEch(el.dataset.s, el.dataset.d === 'x' ? 'x' : +el.dataset.d); break;
+    case 'ech-save': enregistrerEch(false); break;
+    case 'ech-stop': enregistrerEch(true); break;
+    case 'ech-del': if (!S.form.arm) { S.form.arm = true; rendreEch(); } else { const x = trouverEch(S.form.id); fermer(); if (x) { x.deleted = true; x.pending = true; rendre(true); toast('Ligne supprimée'); enfiler({ op: 'ech-del', id: x.id }); } } break;
+    case 'bud-edit': { const c = cats().find(x => x.nom === el.dataset.cat); S.form.edit = c.nom; S.form.val = txtNum(c.budget); S.form.suivi = c.suivi || 'Mensuel'; rendreBudgets(); break; }
+    case 'bud-suivi': S.form.suivi = el.dataset.t; rendreBudgets(); break;
+    case 'bud-ok': okBudget(); break;
+    case 'cat-new': ouvrirCat(null); break;
+    case 'cat-open': ouvrirCat(el.dataset.cat); break;
+    case 'cat-mv': deplacerCat(el.dataset.cat, +el.dataset.d); break;
+    case 'cat-g': S.form.groupe = el.dataset.t; rendreCatEdit(); break;
+    case 'cat-suivi': S.form.suivi = el.dataset.t; rendreCatEdit(); break;
+    case 'cat-cible': S.form.cible = el.dataset.cat; S.form.arm = false; rendreCatEdit(); break;
+    case 'cat-save': enregistrerCat(); break;
+    case 'cat-del': retirerCat(); break;
+    case 's-neg': S.form.neg = !S.form.neg; rendreSolde(); break;
+    case 's-ok': okSolde(); break;
+    case 'dep-ok': okDepart(); break;
     case 'theme': LS.set('theme', el.dataset.t); appliquerTheme(); rendreReglages(); break;
     case 'refresh': fermer(); rafraichir(true); toast('Actualisation…'); break;
     case 'logout': fermer(); LS.del('key'); S.key = ''; verrouiller(); break;
