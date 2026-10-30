@@ -225,7 +225,7 @@ body.discret .pbh b{filter:blur(7px)}
 
 <script>
 /* ================= CONFIG ================= */
-const VERSION = '4.5';
+const VERSION = '4.6';
 // Fonctionnalités masquables (Réglages). Masquer = ne plus afficher ; les données continuent d'être enregistrées.
 const FONCS = [
   ['pj', 'Montant par jour', 'sous le grand chiffre et à la saisie'],
@@ -312,10 +312,12 @@ async function rafraichir(force) {
   if (S.queue.length) return;
   if (!force && Date.now() - S.lastFetch < 20000) return;
   S.lastFetch = Date.now();
+  const gen = S.gen || 0;
   try {
     const r = await api('data');
     if (!r.ok) { if (r.error === 'CLE' || r.error === 'SANS_CLE') return verrouiller(r.message); throw new Error(r.message); }
-    if (S.queue.length) return;
+    // Une écriture a eu lieu pendant la lecture : ces données sont déjà périmées, on les ignore.
+    if (S.queue.length || (S.gen || 0) !== gen) { S.lastFetch = 0; return; }
     S.data = prepData(r.data);
     S.journal = entriesFromData(r.data);
     sauver(); setSync('ok');
@@ -370,7 +372,7 @@ async function pomper() {
   } catch (err) {
     S.busy = false; setSync('off'); setTimeout(pomper, 8000); return;
   }
-  S.queue.shift();
+  S.queue.shift(); S.gen = (S.gen || 0) + 1;
   if (e && !S.queue.some(o => o.id === e.id)) e.pending = false;
   if (x && !S.queue.some(o => o.id === x.id)) x.pending = false;
   S.busy = false;
@@ -533,7 +535,7 @@ function okRemb() {
   if (!(v > 0)) { $('#ferr').textContent = 'Tape le montant reçu'; return; }
   if (v > f.du + 0.005) { $('#ferr').textContent = 'Plus que ce qu\'il te doit (' + e2(f.du) + ')'; return; }
   const y = now.getFullYear(), m = now.getMonth() + 1;
-  const e = { id: uid(), row: null, date: auj(), mois: moisLabel(y, m), lib: f.nom + ' · remboursé', cat: CAT_AV, montant: -v, y, m, srv: null, pending: true, nw: true };
+  const e = { id: uid(), row: null, date: auj(), mois: moisLabel(y, m), lib: f.nom + ' · remboursé le ' + auj().slice(8) + '/' + auj().slice(5, 7), cat: CAT_AV, montant: -v, y, m, srv: null, pending: true, nw: true };
   S.journal.push(e); memo = new Map(); enfiler({ op: 'add', id: e.id });
   fermer(); rendre(true); toast(f.nom + ' : ' + (f.du - v > 0.005 ? 'reste ' + e2(f.du - v) : 'tout est remboursé ✓'), 'ANNULER', () => supprimer(e));
 }
