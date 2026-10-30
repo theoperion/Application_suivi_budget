@@ -7,7 +7,11 @@
 <title>Jauge</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-maskable-512.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Jauge">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
@@ -69,6 +73,10 @@ svg.i{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stro
 .bsub{font-size:11px;color:var(--ink3);font-family:var(--mono);margin-top:2px}
 .bar{height:5px;background:var(--track);border-radius:3px;margin-top:6px;overflow:hidden}
 .bar i{display:block;height:100%;border-radius:3px}
+.bar.an{position:relative;height:7px;overflow:visible;border-radius:2px}
+.bar.an i{border-radius:2px}
+.bar.an::after{content:'';position:absolute;inset:0;background:repeating-linear-gradient(to right,transparent 0,transparent calc(100%/12 - 1.5px),var(--paper) calc(100%/12 - 1.5px),var(--paper) calc(100%/12));pointer-events:none}
+.bar.an b{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-2px;background:var(--ink);border-radius:1px;z-index:1}
 .stamp{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:1px;border:1.5px solid;padding:1px 5px;border-radius:2px;display:inline-block;transform:rotate(-4deg)}
 .s-ok{color:var(--okInk);border-color:var(--ok)}.s-warn{color:var(--warnInk);border-color:var(--warn)}.s-bad{color:var(--badInk);border-color:var(--bad);transform:rotate(3deg)}
 .c-ok{color:var(--okInk)}.c-warn{color:var(--warnInk)}.c-bad{color:var(--badInk)}.c-mute{color:var(--ink3)}
@@ -202,8 +210,7 @@ body.discret .pbh b{filter:blur(7px)}
 
 <script>
 /* ================= CONFIG ================= */
-const API_URL = 'https://script.google.com/macros/s/AKfycbyPhMYduPFehst2c5x_VhOk9Hq8U9AAZsCE7Yj5ozvHloXCyMoi8KxdggiGDyKcvAV9wg/exec';
-const VERSION = '3.6';
+const VERSION = '4.0';
 const API_ATTENDUE = '3.3';
 
 /* ================= OUTILS ================= */
@@ -233,7 +240,7 @@ const VAR = ['Vie courante', 'Loisirs', 'Divers'], FIX = ['Charges fixes', 'Abon
 /* ================= ÉTAT ================= */
 const now = new Date();
 const S = {
-  data: null, journal: [], queue: LS.get('queue', []), key: LS.get('key', ''),
+  data: null, journal: [], queue: LS.get('queue', []), key: LS.get('key', ''), api: LS.get('api', ''),
   tab: 'home', y: now.getFullYear(), m: now.getMonth() + 1,
   filtre: { cat: null, q: '' }, busy: false, lastFetch: 0, lastFrac: 0, anomOpen: false, form: null
 };
@@ -265,7 +272,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', appliquerT
 function api(action, extra) {
   const body = JSON.stringify(Object.assign({ action, key: S.key }, extra || {}));
   if (IN_GAS) return new Promise((res, rej) => google.script.run.withSuccessHandler(t => res(JSON.parse(t))).withFailureHandler(rej).api(body));
-  return fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body, redirect: 'follow' })
+  return fetch(S.api, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body, redirect: 'follow' })
     .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
 }
 function setSync(s) { $('#dot').className = 'dot' + (s === 'sync' ? ' sync' : s === 'off' ? ' off' : ''); }
@@ -419,9 +426,11 @@ function budgets(y, m) {
     const an = c.suivi === 'Annuel', sa = c.suivi === 'Sans alerte';
     let bud = 0, dep = 0;
     for (let k = an ? 1 : m; k <= m; k++) { const p = calc(y, k).par[c.nom]; bud += c.budget + (p ? p.e : 0); dep += p ? p.j + p.e : 0; }
+    let annuel = bud, mois = 0;
+    if (an) { for (let k = m + 1; k <= 12; k++) { const p = calc(y, k).par[c.nom]; annuel += c.budget + (p ? p.e : 0); } const p = calc(y, m).par[c.nom]; mois = p ? p.j + p.e : 0; }
     const reste = bud - dep, ratio = bud > 0 ? dep / bud : 0;
     const etat = sa ? null : reste < -0.5 ? 'bad' : ratio >= s ? 'warn' : 'ok';
-    out.push({ c, an, sa, bud, dep, reste, ratio, etat });
+    out.push({ c, an, sa, bud, dep, reste, ratio, etat, annuel, mois });
   });
   return out;
 }
@@ -619,8 +628,11 @@ function vueAccueil() {
       const w = Math.min(100, x.ratio * 100), col = x.etat === 'bad' ? 'var(--bad)' : x.etat === 'warn' ? 'var(--warn)' : x.etat === 'ok' ? 'var(--ok)' : 'var(--ink3)';
       const st = x.etat ? `<span class="stamp s-${x.etat} ${S.pop === x.c.nom ? 'pop' : ''}">${x.etat === 'ok' ? 'TENU' : x.etat === 'warn' ? 'LIMITE' : 'DÉPASSÉ'}</span>` : '<span class="muted" style="font-size:11px">SANS ALERTE</span>';
       h += `<button class="brow" data-act="budget" data-cat="${esc(x.c.nom)}"><div class="bhead"><span class="bname">${esc(x.c.nom)}</span><span class="bright"><span class="${x.reste < 0 ? 'c-bad' : ''}">${x.reste < 0 ? '−' + e0(-x.reste) : e0(x.reste)}</span>${st}</span></div>
-        <div class="bar"><i style="width:${w}%;background:${col}"></i></div>
-        <div class="bsub">${e0(x.dep)} / ${e0(x.bud)} ${x.an ? '· depuis janvier' : '· ce mois'}</div></button>`;
+        ${x.an && x.annuel > 0
+          ? `<div class="bar an"><i style="width:${Math.min(100, x.dep / x.annuel * 100)}%;background:${col}"></i><b style="left:${Math.min(100, x.bud / x.annuel * 100)}%"></b></div>
+        <div class="bsub">${e0(x.dep)} / ${e0(x.bud)} à fin ${MC[S.m - 1]} · ce mois ${e0(x.mois)}</div>`
+          : `<div class="bar"><i style="width:${w}%;background:${col}"></i></div>
+        <div class="bsub">${e0(x.dep)} / ${e0(x.bud)} · ce mois</div>`}</button>`;
     });
     if (tous.length > 5) h += `<button class="chip" style="margin-top:10px" data-act="allbud">${S.allBud ? 'Afficher moins ▴' : 'Tous les budgets (' + tous.length + ') ▾'}</button>`;
   }
@@ -714,7 +726,7 @@ function fermer() { $('#veil').classList.remove('on'); $('#sheet').classList.rem
 function montantNum() { const n = parseFloat(String(S.form.montant).replace(',', '.')); return isFinite(n) ? n : 0; }
 function rendreForm() {
   const f = S.form; if (!f) return;
-  const R = { reglages: rendreReglages, budgets: rendreBudgets, cats: rendreCats, catedit: rendreCatEdit, solde: rendreSolde, ech: rendreEch, av: rendreAv, mois: rendreMoisGrille, fiche: rendreFiche }[f.mode];
+  const R = { lien: rendreLien, reglages: rendreReglages, budgets: rendreBudgets, cats: rendreCats, catedit: rendreCatEdit, solde: rendreSolde, ech: rendreEch, av: rendreAv, mois: rendreMoisGrille, fiche: rendreFiche }[f.mode];
   if (R) return R();
   const fav = favoris(f.type), pins = LS.get('pins', []), futur = statut(f.y, f.m) === 'futur';
   if (f.cat && !fav.includes(f.cat) && typeDe(f.cat) === f.type) fav.unshift(f.cat);
@@ -1244,7 +1256,8 @@ function rendreReglages() {
     <div class="grp" style="margin-top:18px">DONNÉES</div>
     ${S.data.url ? `<a class="opt" href="${esc(S.data.url)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none"><span>Ouvrir mon fichier Google Sheets</span><span class="muted">↗</span></a>` : ''}
     <button class="opt" data-act="refresh"><span>Actualiser depuis le fichier</span><span class="muted mono" style="font-size:12px">${S.queue.length ? S.queue.length + ' en attente' : 'à jour'}</span></button>
-    <button class="opt" data-act="logout"><span>Changer de clé d'accès</span><span class="muted">›</span></button>
+    ${IN_GAS ? '' : `<button class="opt" data-act="go:lien"><span>Lien de mon script</span><span class="muted mono" style="font-size:12px">modifier ›</span></button>`}
+    <button class="danger ${S.form.armOut ? 'armed' : ''}" data-act="logout" style="margin-top:14px">${S.form.armOut ? 'TOUCHE ENCORE : DÉCONNEXION DE CE TÉLÉPHONE' : 'SE DÉCONNECTER / CHANGER DE COMPTE'}</button>
     <p class="muted mono" style="font-size:11px;text-align:center;margin-top:22px">JAUGE · V${VERSION}</p>`;
 }
 
@@ -1442,29 +1455,59 @@ function statsMois(y, m) {
 }
 
 /* ================= VERROU ================= */
+const URL_OK = u => /^https:\/\/script\.google\.com\/(a\/[^/]+\/)?macros\/s\/[\w-]+\/exec\/?$/.test(u);
+function oublierCompte() {
+  ['key', 'api', 'cache', 'queue', 'ordre', 'pins', 'usage', 'controles', 'bilanVu'].forEach(k => LS.del(k));
+  Object.assign(S, { key: '', api: '', data: null, journal: [], queue: [], lastBig: null, lastFrac: 0 });
+}
+// Écran de connexion : chacun branche SON script et SA clé. Rien n'est stocké ailleurs que sur ce téléphone.
 function verrouiller(msg) {
   const l = $('#lock'); l.hidden = false;
-  const sansUrl = !IN_GAS && (!API_URL || API_URL.startsWith('COLLE'));
   l.innerHTML = `<div class="in"><div class="mono" style="letter-spacing:6px;font-weight:600;font-size:22px">JAUGE</div>
     <p class="muted" style="margin:6px 0 22px">ton budget, à l'aiguille près</p>
-    ${sansUrl ? '<p class="c-bad">Il manque l\'adresse de l\'API dans index.html (ligne API_URL).</p>' : `
-    <input class="libin" id="kin" type="password" placeholder="Clé d'accès" autocomplete="current-password">
+    ${IN_GAS ? '' : `<input class="libin" id="uin" type="url" placeholder="Lien de ton script (finit par /exec)" value="${esc(S.api || '')}" autocomplete="off" style="font-size:14px">`}
+    <input class="libin" id="kin" type="password" placeholder="Ta clé" autocomplete="current-password" style="margin-top:0">
     <div class="err" id="kerr">${msg ? esc(msg) : ''}</div>
-    <button class="go" id="kgo">OUVRIR</button>`}</div>`;
-  const go = $('#kgo'); if (!go) return;
+    <button class="go" id="kgo">OUVRIR</button>
+    ${IN_GAS ? '' : `<p class="muted" style="font-size:12px;margin-top:18px;text-align:left">Le lien se trouve dans ton fichier : Extensions › Apps Script › Déployer › Gérer les déploiements. Il reste sur ce téléphone et n'est envoyé qu'à ton propre script.</p>`}</div>`;
+  const go = $('#kgo');
   const valider = async () => {
-    const v = $('#kin').value.trim(); if (!v) { $('#kerr').textContent = 'Tape ta clé'; return; }
-    go.textContent = 'VÉRIFICATION…'; S.key = v;
+    const u = IN_GAS ? '' : $('#uin').value.trim(), v = $('#kin').value.trim();
+    if (!IN_GAS && !URL_OK(u)) { $('#kerr').textContent = 'Colle le lien complet de ton script (https://script.google.com/macros/s/…/exec)'; return; }
+    if (!v) { $('#kerr').textContent = 'Tape ta clé'; return; }
+    const ancien = S.api;
+    if (!IN_GAS && ancien && ancien !== u) oublierCompte();
+    go.textContent = 'VÉRIFICATION…'; S.key = v; S.api = u;
     try {
       const r = await api('data');
       if (!r.ok) { go.textContent = 'OUVRIR'; $('#kerr').textContent = r.message || 'Clé incorrecte'; return; }
-      LS.set('key', v); S.data = prepData(r.data); S.journal = entriesFromData(r.data); S.queue = []; sauver();
+      LS.set('key', v); LS.set('api', u); S.data = prepData(r.data); S.journal = entriesFromData(r.data); S.queue = []; sauver();
       l.hidden = true; S.lastFetch = Date.now(); setSync('ok'); rendre(); pomper();
-    } catch (e) { go.textContent = 'OUVRIR'; $('#kerr').textContent = 'Connexion impossible. Vérifie ta connexion internet.'; }
+    } catch (e) { go.textContent = 'OUVRIR'; $('#kerr').textContent = 'Connexion impossible : vérifie le lien, ta connexion internet, et que le déploiement est en accès « Tout le monde ».'; }
   };
   go.addEventListener('click', valider);
   $('#kin').addEventListener('keydown', e => { if (e.key === 'Enter') valider(); });
-  setTimeout(() => $('#kin').focus(), 100);
+  setTimeout(() => (IN_GAS || S.api ? $('#kin') : $('#uin')).focus(), 100);
+}
+function rendreLien() {
+  const f = S.form;
+  $('#sheetIn').innerHTML = enteteSheet('RÉGLAGES', 'reglages') + `
+    <div class="note" style="margin-top:14px">Après un nouveau déploiement de ton Apps Script, colle ici le nouveau lien. Ta clé et tes données restent les mêmes.</div>
+    <input class="libin" data-f="url" type="url" value="${esc(f.url)}" placeholder="https://script.google.com/macros/s/…/exec" style="font-size:14px">
+    <div class="err" id="ferr"></div><button class="go" data-act="lien-ok">TESTER ET ENREGISTRER</button>`;
+  lierChamps();
+}
+async function okLien() {
+  const u = String(S.form.url || '').trim(), z = $('#ferr');
+  if (!URL_OK(u)) { z.textContent = 'Lien incorrect : il doit finir par /exec'; return; }
+  z.textContent = 'Vérification…';
+  const ancien = S.api; S.api = u;
+  try {
+    const r = await api('data');
+    if (!r.ok) { S.api = ancien; z.textContent = r.message || 'Ce script refuse ta clé'; return; }
+    LS.set('api', u); S.data = prepData(r.data); if (!S.queue.length) S.journal = entriesFromData(r.data); sauver();
+    fermer(); rendre(true); toast('Nouveau lien enregistré'); pomper();
+  } catch (e) { S.api = ancien; z.textContent = 'Connexion impossible avec ce lien'; }
 }
 
 /* ================= TOAST ================= */
@@ -1569,7 +1612,9 @@ document.addEventListener('click', ev => {
     case 'dep-ok': okDepart(); break;
     case 'theme': LS.set('theme', el.dataset.t); appliquerTheme(); rendreReglages(); break;
     case 'refresh': fermer(); rafraichir(true); toast('Actualisation…'); break;
-    case 'logout': fermer(); LS.del('key'); S.key = ''; verrouiller(); break;
+    case 'logout': if (!S.form.armOut) { S.form.armOut = true; rendreReglages(); } else { fermer(); oublierCompte(); rendre(); verrouiller(); } break;
+    case 'go:lien': S.form = { mode: 'lien', url: S.api }; rendreForm(); break;
+    case 'lien-ok': okLien(); break;
   }
 });
 (function tirerPourActualiser() {
@@ -1581,7 +1626,7 @@ document.addEventListener('click', ev => {
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { rafraichir(false); pomper(); } });
 
 /* ================= DÉMARRAGE ================= */
-if (!S.key) verrouiller(); else { rendre(); rafraichir(true); pomper(); if (/[?&]saisie=1/.test(location.search)) ouvrirSaisie(null); }
+if (!S.key || (!IN_GAS && !S.api)) verrouiller(); else { rendre(); rafraichir(true); pomper(); if (/[?&]saisie=1/.test(location.search)) ouvrirSaisie(null); }
 if (!IN_GAS && 'serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 </body>
