@@ -270,7 +270,7 @@ const CAT_AV = 'Avances (on me doit)', estAv = n => /^Avances/i.test(String(n ||
 /* ================= ÉTAT ================= */
 const now = new Date();
 const S = {
-  data: null, journal: [], queue: LS.get('queue', []), key: LS.get('key', ''), api: LS.get('api', '') || (/\/exec\/?$/.test(API_DEFAUT) ? API_DEFAUT : ''),
+  data: null, journal: [], queue: LS.get('queue', []), key: LS.get('key', ''), api: (() => { const ok = /\/exec\/?$/.test(API_DEFAUT); if (ok && LS.get('apiDefautVu', '') !== API_DEFAUT) { LS.set('apiDefautVu', API_DEFAUT); LS.set('api', API_DEFAUT); } return LS.get('api', '') || (ok ? API_DEFAUT : ''); })(),
   tab: 'home', y: now.getFullYear(), m: now.getMonth() + 1,
   filtre: { cat: null, q: '' }, busy: false, lastFetch: 0, lastFrac: 0, anomOpen: false, form: null
 };
